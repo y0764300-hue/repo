@@ -3,7 +3,7 @@ import pandas as pd
 from datetime import datetime
 import pytz
 import os
-import google.generativeai as genai
+from google import genai
 from streamlit_gsheets import GSheetsConnection
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
@@ -141,20 +141,22 @@ st.markdown("""
 # ==========================================
 st.set_page_config(page_title="스마트 업무 비서", layout="wide")
 
+# Gemini 클라이언트 초기화
 if "GEMINI_API_KEY" in st.secrets:
     gemini_api_key = st.secrets["GEMINI_API_KEY"]
+    client = genai.Client(api_key=gemini_api_key)
 else:
     gemini_api_key = None
+    client = None
 
 with st.sidebar:
     st.markdown("### 🔑 AI 설정")
     if gemini_api_key:
-        genai.configure(api_key=gemini_api_key)
         st.success("AI 자동 연결됨 (Secrets) 🟢")
     else:
         user_key = st.text_input("Google API Key 입력", type="password")
         if user_key:
-            genai.configure(api_key=user_key)
+            client = genai.Client(api_key=user_key)
             gemini_api_key = user_key
             st.success("AI 연결됨! 🟢")
         else:
@@ -346,13 +348,9 @@ if mode == "📝 업무 기록하기":
 # ------------------------------------------
 # [모드 2] 코드/대화 이력
 # ------------------------------------------
-# ------------------------------------------
-# [모드 2] 코드/대화 이력
-# ------------------------------------------
 elif mode == "💬 코드/대화 이력":
     st.title("💬 코드 변경 이력 자동 추적")
     
-    # 세션 상태 초기화
     if 'ai_summary' not in st.session_state:
         st.session_state.ai_summary = ""
     
@@ -371,12 +369,10 @@ elif mode == "💬 코드/대화 이력":
         
         final_content = raw_text_input if raw_text_input else file_content
         
-        if final_content and gemini_api_key:
+        if final_content and client:
             if st.button("🤖 자동 요약", type="primary"):
                 with st.spinner("분석 중..."):
                     try:
-                        model = genai.GenerativeModel('gemini-2.5-flash')
-                        
                         prompt = f"""다음 대화를 분석해서 정리해줘:
 
 ## 해결한 문제
@@ -394,7 +390,10 @@ elif mode == "💬 코드/대화 이력":
 [대화]
 {final_content[:20000]}"""
                         
-                        response = model.generate_content(prompt)
+                        response = client.models.generate_content(
+                            model='gemini-2.5-flash',
+                            contents=prompt
+                        )
                         st.session_state.ai_summary = response.text.strip()
                         st.success("✅ 요약 완료!")
                         st.rerun()
@@ -402,7 +401,6 @@ elif mode == "💬 코드/대화 이력":
                     except Exception as e:
                         st.error(f"AI 오류: {e}")
     
-    # 요약 결과 표시 및 저장
     if st.session_state.ai_summary:
         st.divider()
         st.subheader("📄 요약 결과")
@@ -455,7 +453,6 @@ elif mode == "💬 코드/대화 이력":
     else:
         st.info("기록 없음")
 
-
 # ------------------------------------------
 # [모드 3] 일일 리포트
 # ------------------------------------------
@@ -474,12 +471,13 @@ elif mode == "📊 일일 리포트":
             notes_text += f"- [{row['메뉴']}] {row['내용']}\n"
         
         if st.button("🚀 AI 리포트 생성"):
-            if gemini_api_key:
+            if client:
                 with st.spinner("생성 중..."):
                     try:
-                        model = genai.GenerativeModel('gemini-2.5-flash')
-                        prompt = f"다음 업무 로그를 보고서로 작성해줘:\n\n{notes_text}"
-                        response = model.generate_content(prompt)
+                        response = client.models.generate_content(
+                            model='gemini-2.5-flash',
+                            contents=f"다음 업무 로그를 보고서로 작성해줘:\n\n{notes_text}"
+                        )
                         st.markdown(response.text)
                     except Exception as e:
                         st.error(f"오류: {e}")

@@ -1,10 +1,8 @@
 streamlit
 pandas
 pytz
-google-generativeai
-st-gsheets-connection
+google-genai
+streamlit-gsheets
 google-auth
-google-auth-oauthlib
-google-auth-httplib2
 google-api-python-client
 Pillow
