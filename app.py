@@ -348,11 +348,16 @@ if mode == "📝 업무 기록하기":
 # ------------------------------------------
 # [모드 2] 코드/대화 이력
 # ------------------------------------------
+# ------------------------------------------
+# [모드 2] 코드/대화 이력
+# ------------------------------------------
 elif mode == "💬 코드/대화 이력":
     st.title("💬 코드 변경 이력 자동 추적")
     
     if 'ai_summary' not in st.session_state:
         st.session_state.ai_summary = ""
+    if 'selected_save_menu' not in st.session_state:
+        st.session_state.selected_save_menu = None
     
     with st.expander("📥 대화 내용 가져오기", expanded=True):
         tab1, tab2 = st.tabs(["📝 직접 붙여넣기", "📂 파일 업로드"])
@@ -401,15 +406,32 @@ elif mode == "💬 코드/대화 이력":
                     except Exception as e:
                         st.error(f"AI 오류: {e}")
     
+    # 요약 결과 표시 및 저장
     if st.session_state.ai_summary:
         st.divider()
         st.subheader("📄 요약 결과")
         st.markdown(st.session_state.ai_summary)
         
-        col1, col2 = st.columns([1, 5])
+        st.divider()
+        st.write("##### 💾 저장 옵션")
+        
+        # 업무 메뉴 선택
+        config_df = load_sheet("config")
+        if not config_df.empty:
+            menu_list = ["선택 안 함"] + config_df['메뉴명'].tolist()
+            st.session_state.selected_save_menu = st.selectbox(
+                "관련 업무 선택 (선택 시 해당 업무에도 기록됨)",
+                menu_list,
+                key="save_menu_select"
+            )
+        
+        col1, col2, col3 = st.columns([1, 1, 4])
+        
         with col1:
-            if st.button("💾 저장", type="primary"):
+            if st.button("💾 저장", type="primary", use_container_width=True):
                 now = now_kst()
+                
+                # 1. chats 시트에 저장 (이력)
                 new_chat = {
                     '날짜': now.strftime("%Y-%m-%d"),
                     '시간': now.strftime("%H:%M:%S"),
@@ -419,15 +441,35 @@ elif mode == "💬 코드/대화 이력":
                 
                 df_chat = load_sheet("chats")
                 df_chat = pd.concat([pd.DataFrame([new_chat]), df_chat], ignore_index=True)
+                save_success = save_sheet(df_chat, "chats")
                 
-                if save_sheet(df_chat, "chats"):
-                    st.success("저장 완료!")
-                    st.session_state.ai_summary = ""
-                    st.rerun()
+                # 2. 업무 선택 시 notes 시트에도 저장
+                if st.session_state.selected_save_menu and st.session_state.selected_save_menu != "선택 안 함":
+                    new_note = {
+                        '날짜': now.strftime("%Y-%m-%d"),
+                        '시간': now.strftime("%H:%M:%S"),
+                        '메뉴': st.session_state.selected_save_menu,
+                        '유형': "💡 아이디어",
+                        '내용': st.session_state.ai_summary,
+                        '이미지': ""
+                    }
+                    
+                    df_note = load_sheet("notes")
+                    df_note = pd.concat([pd.DataFrame([new_note]), df_note], ignore_index=True)
+                    save_sheet(df_note, "notes")
+                    
+                    st.success(f"✅ 이력 + [{st.session_state.selected_save_menu}] 업무에 저장 완료!")
+                elif save_success:
+                    st.success("✅ 이력에 저장 완료!")
+                
+                st.session_state.ai_summary = ""
+                st.session_state.selected_save_menu = None
+                st.rerun()
         
         with col2:
-            if st.button("🔄 새로 요약"):
+            if st.button("🔄 새로 요약", use_container_width=True):
                 st.session_state.ai_summary = ""
+                st.session_state.selected_save_menu = None
                 st.rerun()
     
     st.divider()
@@ -443,15 +485,16 @@ elif mode == "💬 코드/대화 이력":
                     st.markdown(f"**{row['주제']}**")
                     st.caption(f"{row['날짜']} {row['시간']}")
                 with col2:
-                    if st.button("🗑️", key=f"del_{idx}"):
+                    if st.button("🗑️", key=f"del_chat_{idx}"):
                         df_chat = df_chat.drop(idx)
                         if save_sheet(df_chat, "chats"):
                             st.toast("삭제됨!")
                             st.rerun()
-                with st.expander("내용"):
+                with st.expander("내용 보기"):
                     st.markdown(row['전체내용'])
     else:
         st.info("기록 없음")
+
 
 # ------------------------------------------
 # [모드 3] 일일 리포트
