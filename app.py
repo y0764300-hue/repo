@@ -28,12 +28,12 @@ conn = st.connection("gsheets", type=GSheetsConnection)
 # 📌 데이터 로드/저장 함수
 # ==========================================
 def load_sheet(worksheet_name):
-    """구글 시트에서 데이터를 불러오는 함수 (인코딩 안전 처리 강화)"""
+    """구글 시트에서 데이터를 불러오는 함수 (캐시 완전 무효화)"""
     try:
-        # ttl=0으로 캐시 무시
-        df = conn.read(worksheet=worksheet_name, ttl=0)
+        # ✅ ttl=1로 캐시 최소화
+        df = conn.read(worksheet=worksheet_name, ttl=1)
         
-        # 완전 복사본 생성
+        # ✅ 완전 복사본 생성
         df = df.copy()
         
         if df.empty or df.shape[1] == 0:
@@ -44,15 +44,15 @@ def load_sheet(worksheet_name):
             elif worksheet_name == "config":
                 return pd.DataFrame(columns=["메뉴명", "시트정보", "트리거정보", "업무설명", "메일발송설정"])
         
-        # ✅ 빈 값 먼저 처리
+        # ✅ 빈 값 처리
         df = df.fillna("")
         
-        # ✅ 모든 컬럼 인코딩 안전 처리
+        # ✅ 모든 컬럼 문자열 변환 + 인코딩 안전 처리
         for col in df.columns:
             try:
-                # UTF-8 인코딩 강제 적용
                 df[col] = df[col].apply(
-                    lambda x: str(x).encode('utf-8', errors='ignore').decode('utf-8') if pd.notna(x) and str(x).strip() else ""
+                    lambda x: str(x).encode('utf-8', errors='ignore').decode('utf-8').strip() 
+                    if pd.notna(x) and str(x).strip() != '' else ""
                 )
             except Exception:
                 df[col] = df[col].astype(str)
@@ -115,6 +115,14 @@ with st.sidebar:
             st.success("AI 연결됨! 🟢")
         else:
             st.warning("API 키가 없습니다.")
+    
+    # ✅ 캐시 초기화 버튼 추가
+    st.divider()
+    if st.button("🔄 캐시 초기화"):
+        st.cache_data.clear()
+        st.cache_resource.clear()
+        st.success("캐시가 초기화되었습니다!")
+        st.rerun()
 
 mode = st.sidebar.radio("모드 선택", ["📝 업무 기록하기", "💬 코드/대화 이력", "📊 일일 리포트", "⚙️ 메뉴/설정 관리"])
 
@@ -223,12 +231,16 @@ if mode == "📝 업무 기록하기":
         # ✅ 2025년 데이터 일괄 삭제 버튼
         if st.button("🗑️ 2025년 삭제", help="2025년 모든 기록 삭제"):
             df = load_sheet("notes")
-            df_remain = df[df['날짜'].str.startswith('2026') | ~df['날짜'].str.startswith('2025')]
+            df_remain = df[~df['날짜'].str.startswith('2025')]
             if save_sheet(df_remain, "notes"):
                 st.toast("2025년 기록이 삭제되었습니다!", icon="🗑️")
                 st.rerun()
 
     df = load_sheet("notes").fillna("")
+    
+    # ✅ 2025년 데이터 완전 제거
+    df = df[~df['날짜'].str.startswith('2025')]
+    
     df_filtered = df[df['메뉴'] == selected_menu_name]
     mask = df_filtered['유형'].apply(lambda x: any(f in x for f in selected_filters))
     df_final = df_filtered[mask]
@@ -240,17 +252,20 @@ if mode == "📝 업무 기록하기":
             
             # ✅ 안전하게 문자열 변환
             try:
-                note_date = str(row['날짜']).strip() if pd.notna(row['날짜']) else ""
-                note_time = str(row['시간']).strip() if pd.notna(row['시간']) else ""
-                note_type = str(row['유형']).strip() if pd.notna(row['유형']) else ""
-                note_content = str(row['내용']).strip() if pd.notna(row['내용']) else ""
+                note_date = str(row['날짜']).strip()
+                note_time = str(row['시간']).strip()
+                note_type = str(row['유형']).strip()
+                note_content = str(row['내용']).strip()
                 
-                # ✅ 빈 내용이나 'nan' 스킵
-                if not note_content or note_content == 'nan' or len(note_content) < 1:
+                # ✅ 빈 내용 완전 차단
+                if (not note_content or 
+                    note_content == 'nan' or 
+                    note_content == '' or 
+                    len(note_content) < 2):
                     continue
                 
-                # ✅ 날짜 필터링 (2025년 데이터 제외)
-                if note_date.startswith('2025'):
+                # ✅ 2025년 데이터 재확인 차단
+                if '2025' in note_date:
                     continue
                     
             except Exception:
