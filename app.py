@@ -9,6 +9,7 @@ from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload
 import io
+from PIL import Image
 
 # ==========================================
 # 📌 공통: KST 타임존 설정
@@ -45,6 +46,51 @@ def upload_to_drive(image_file, filename):
         media = MediaIoBaseUpload(
             io.BytesIO(image_file.read()),
             mimetype=image_file.type,
+            resumable=True
+        )
+        
+        file = service.files().create(
+            body=file_metadata,
+            media_body=media,
+            fields='id'
+        ).execute()
+        
+        service.permissions().create(
+            fileId=file['id'],
+            body={'type': 'anyone', 'role': 'reader'}
+        ).execute()
+        
+        image_url = f"https://drive.google.com/uc?export=view&id={file['id']}"
+        
+        return image_url
+        
+    except Exception as e:
+        st.error(f"Drive 업로드 실패: {e}")
+        return None
+
+def upload_pil_to_drive(pil_image, filename):
+    """PIL 이미지를 Drive에 업로드"""
+    try:
+        credentials = service_account.Credentials.from_service_account_info(
+            st.secrets["gcp_service_account"],
+            scopes=['https://www.googleapis.com/auth/drive.file']
+        )
+        service = build('drive', 'v3', credentials=credentials)
+        
+        folder_id = st.secrets["GOOGLE_DRIVE_FOLDER_ID"]
+        
+        file_metadata = {
+            'name': filename,
+            'parents': [folder_id]
+        }
+        
+        img_byte_arr = io.BytesIO()
+        pil_image.save(img_byte_arr, format='PNG')
+        img_byte_arr.seek(0)
+        
+        media = MediaIoBaseUpload(
+            img_byte_arr,
+            mimetype='image/png',
             resumable=True
         )
         
@@ -237,21 +283,49 @@ if mode == "📝 업무 기록하기":
     
     st.text_area("내용 입력", height=100, placeholder=ph, key=input_key, label_visibility="collapsed")
     
-    uploaded_image = st.file_uploader("📸 캡처 이미지 첨부 (선택)", 
-                                      type=['png', 'jpg', 'jpeg'],
-                                      key=f"img_{selected_menu_name}")
+    # 이미지 업로드 섹션
+    st.write("###### 📸 이미지 첨부")
+    
+    tab1, tab2 = st.tabs(["📁 파일 선택", "📋 클립보드 붙여넣기"])
+    
+    uploaded_image = None
+    pasted_image = None
+    
+    with tab1:
+        uploaded_image = st.file_uploader("파일 선택", 
+                                          type=['png', 'jpg', 'jpeg'],
+                                          key=f"file_{selected_menu_name}",
+                                          label_visibility="collapsed")
+    
+    with tab2:
+        st.info("💡 캡처한 이미지를 Ctrl+V로 붙여넣으세요")
+        paste_key = f"paste_{selected_menu_name}"
+        
+        if paste_key not in st.session_state:
+            st.session_state[paste_key] = None
+        
+        pasted_data = st.file_uploader("캡처 이미지 붙여넣기", 
+                                       type=['png', 'jpg', 'jpeg'],
+                                       key=f"paste_uploader_{selected_menu_name}",
+                                       label_visibility="collapsed")
+        
+        if pasted_data is not None:
+            pasted_image = pasted_data
+            st.image(pasted_image, caption="붙여넣은 이미지", use_container_width=True)
+    
+    # 최종 이미지 선택
+    final_image = pasted_image if pasted_image else uploaded_image
     
     if st.button("💾 기록 저장", type="primary"):
         safe_content = st.session_state.get(input_key, "")
         if safe_content.strip():
             image_url = ""
             
-            if uploaded_image is not None:
+            if final_image is not None:
                 with st.spinner("📤 이미지 업로드 중..."):
                     now = now_kst()
-                    ext = uploaded_image.name.split('.')[-1]
-                    filename = f"{now.strftime('%Y%m%d_%H%M%S')}_{selected_menu_name}.{ext}"
-                    image_url = upload_to_drive(uploaded_image, filename)
+                    filename = f"{now.strftime('%Y%m%d_%H%M%S')}_{selected_menu_name}.png"
+                    image_url = upload_to_drive(final_image, filename)
                     if image_url:
                         st.success("✅ 이미지 업로드 완료!")
             
@@ -346,9 +420,25 @@ elif mode == "💬 코드/대화 이력":
             if st.button("🤖 자동 요약", type="primary"):
                 with st.spinner("분석 중..."):
                     try:
-                        model = genai.GenerativeModel('gemini-pro')
+                        model = genai.GenerativeModel('gemini-2.0-flash-exp')
                         
-                        prompt = f"다음 대화를 요약해서 정리해줘:\n\n{final_content[:20000]}"
+                        prompt = f"""다음 대화를 분석해서 정리해줘:
+
+## 해결한 문제
+(3줄 요약)
+
+## 내가 한 질문
+(리스트)
+
+## 변경된 파일
+(파일명과 변경 내용)
+
+## 최종 결과
+(해결 여부)
+
+[대화]
+{final_content[:20000]}"""
+                        
                         response = model.generate_content(prompt)
                         ai_summary = response.text.strip()
                         
@@ -360,7 +450,7 @@ elif mode == "💬 코드/대화 이력":
                             new_chat = {
                                 '날짜': now.strftime("%Y-%m-%d"),
                                 '시간': now.strftime("%H:%M:%S"),
-                                '주제': ai_summary[:100],
+                                '주제': ai_summary.split('\n')[0][:100],
                                 '전체내용': ai_summary
                             }
                             
@@ -418,7 +508,7 @@ elif mode == "📊 일일 리포트":
             if gemini_api_key:
                 with st.spinner("생성 중..."):
                     try:
-                        model = genai.GenerativeModel('gemini-pro')
+                        model = genai.GenerativeModel('gemini-2.0-flash-exp')
                         prompt = f"다음 업무 로그를 보고서로 작성해줘:\n\n{notes_text}"
                         response = model.generate_content(prompt)
                         st.markdown(response.text)
