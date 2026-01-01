@@ -28,9 +28,10 @@ conn = st.connection("gsheets", type=GSheetsConnection)
 # 📌 데이터 로드/저장 함수
 # ==========================================
 def load_sheet(worksheet_name):
-    """구글 시트에서 데이터를 불러오는 함수"""
+    """구글 시트에서 데이터를 불러오는 함수 (인코딩 안전 처리)"""
     try:
         df = conn.read(worksheet=worksheet_name, ttl=0)
+        
         if df.empty or df.shape[1] == 0:
             if worksheet_name == "notes":
                 return pd.DataFrame(columns=['날짜', '시간', '메뉴', '유형', '내용'])
@@ -38,7 +39,13 @@ def load_sheet(worksheet_name):
                 return pd.DataFrame(columns=['날짜', '시간', '주제', '전체내용'])
             elif worksheet_name == "config":
                 return pd.DataFrame(columns=["메뉴명", "시트정보", "트리거정보", "업무설명", "메일발송설정"])
+        
+        # ✅ 모든 컬럼을 문자열로 안전하게 변환
+        for col in df.columns:
+            df[col] = df[col].astype(str)
+        
         return df
+        
     except Exception as e:
         st.error(f"시트 읽기 실패 ({worksheet_name}): {e}")
         if worksheet_name == "notes":
@@ -104,7 +111,7 @@ mode = st.sidebar.radio("모드 선택", ["📝 업무 기록하기", "💬 코�
 if mode == "📝 업무 기록하기":
     config_df = load_sheet("config")
     
-    # ✅ config 시트 비어있으면 경고하고 중단 (덮어쓰기 절대 안함)
+    # ✅ config 시트 비어있으면 경고하고 중단
     if config_df.empty or len(config_df) == 0:
         st.error("⚠️ config 시트가 비어있습니다. Google Sheets에서 데이터를 복구해주세요.")
         st.info("📋 config 시트 필수 컬럼: 메뉴명, 시트정보, 트리거정보, 업무설명, 메일발송설정")
@@ -209,13 +216,28 @@ if mode == "📝 업무 기록하기":
     if my_notes_idx:
         for idx in my_notes_idx:
             row = df.loc[idx]
-            icon = "🔥" if "문제점" in str(row['유형']) else ("💡" if "아이디어" in str(row['유형']) else "✅")
+            
+            # ✅ 안전하게 문자열 변환
+            try:
+                note_date = str(row['날짜']) if pd.notna(row['날짜']) else ""
+                note_time = str(row['시간']) if pd.notna(row['시간']) else ""
+                note_type = str(row['유형']) if pd.notna(row['유형']) else ""
+                note_content = str(row['내용']) if pd.notna(row['내용']) else ""
+                
+                # 빈 내용 스킵
+                if not note_content.strip() or note_content == 'nan':
+                    continue
+                    
+            except Exception:
+                continue
+            
+            icon = "🔥" if "문제점" in note_type else ("💡" if "아이디어" in note_type else "✅")
             
             with st.container(border=True):
                 col_txt, col_btn = st.columns([0.88, 0.12])
                 
                 with col_txt:
-                    st.markdown(f"**{icon} [{row['유형']}] {row['날짜']} {row['시간']}**")
+                    st.markdown(f"**{icon} [{note_type}] {note_date} {note_time}**")
                 
                 with col_btn:
                     edit_mode_key = f"edit_mode_{idx}"
@@ -226,7 +248,7 @@ if mode == "📝 업무 기록하기":
                     with b1:
                         if is_editing:
                             if st.button("💾", key=f"save_{idx}", help="저장"):
-                                new_content = st.session_state.get(f"txt_{idx}", row['내용'])
+                                new_content = st.session_state.get(f"txt_{idx}", note_content)
                                 df.at[idx, '내용'] = new_content
                                 if save_sheet(df, "notes"):
                                     st.session_state[edit_mode_key] = False
@@ -244,11 +266,11 @@ if mode == "📝 업무 기록하기":
                                 st.rerun()
 
                 if is_editing:
-                    st.text_area("내용 수정", value=str(row['내용']),
+                    st.text_area("내용 수정", value=note_content,
                                  key=f"txt_{idx}", height=120,
                                  label_visibility="collapsed")
                 else:
-                    display_text = str(row['내용']).replace("\n", "  \n")
+                    display_text = note_content.replace("\n", "  \n")
                     st.markdown(display_text)
     else:
         st.info("조건에 맞는 기록이 없습니다.")
