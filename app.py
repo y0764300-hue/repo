@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime
-import pytz  # ✅ KST 적용용
+import pytz
 import os
 import google.generativeai as genai
 from streamlit_gsheets import GSheetsConnection
@@ -32,7 +32,6 @@ def load_sheet(worksheet_name):
     try:
         df = conn.read(worksheet=worksheet_name, ttl=0)
         if df.empty or df.shape[1] == 0:
-            # 빈 시트인 경우 기본 구조 생성
             if worksheet_name == "notes":
                 return pd.DataFrame(columns=['날짜', '시간', '메뉴', '유형', '내용'])
             elif worksheet_name == "chats":
@@ -42,7 +41,6 @@ def load_sheet(worksheet_name):
         return df
     except Exception as e:
         st.error(f"시트 읽기 실패 ({worksheet_name}): {e}")
-        # 에러 시 빈 DataFrame 반환
         if worksheet_name == "notes":
             return pd.DataFrame(columns=['날짜', '시간', '메뉴', '유형', '내용'])
         elif worksheet_name == "chats":
@@ -60,10 +58,11 @@ def save_sheet(df, worksheet_name):
         return False
 
 # ==========================================
-# 📌 초기 데이터 생성 (구글 시트에 없으면 생성)
+# 📌 초기 데이터 생성 (✅ 덮어쓰기 방지)
 # ==========================================
 config_df = load_sheet("config")
 if config_df.empty or len(config_df) == 0:
+    st.warning("⚠️ config 시트가 비어있습니다. 기본 데이터로 표시합니다.")
     default_data = {
         "메뉴명": ["📦 피킹지시", "🔍 재고조회", "🚛 입고처리", "🏷️ 바코드 관리"],
         "시트정보": [
@@ -87,7 +86,7 @@ if config_df.empty or len(config_df) == 0:
         "메일발송설정": [True, False, False, True]
     }
     config_df = pd.DataFrame(default_data)
-    save_sheet(config_df, "config")
+    # ✅ save_sheet 제거 (시트 덮어쓰기 방지)
 
 # ==========================================
 # 2. 스타일 (CSS)
@@ -137,8 +136,13 @@ if mode == "📝 업무 기록하기":
     config_df = load_sheet("config")
     menu_list = config_df['메뉴명'].tolist()
     selected_menu_name = st.sidebar.radio("업무 선택", menu_list)
-    current_idx = config_df.index[config_df['메뉴명'] == selected_menu_name][0]
-    current_row = config_df.iloc[current_idx]
+    
+    try:
+        current_idx = config_df.index[config_df['메뉴명'] == selected_menu_name][0]
+        current_row = config_df.iloc[current_idx]
+    except (IndexError, KeyError):
+        st.error("⚠️ config 시트 데이터가 올바르지 않습니다.")
+        st.stop()
     
     st.header(f"{selected_menu_name}")
     
@@ -188,10 +192,11 @@ if mode == "📝 업무 기록하기":
     st.text_area("내용 입력", height=100, placeholder=ph,
                  key=input_key, label_visibility="collapsed")
     
+    # ✅ 저장 버튼 크래시 방지
     if st.button("💾 기록 저장", type="primary"):
         safe_content = st.session_state.get(input_key, "")
         if safe_content.strip():
-            now = now_kst()  # ✅ 한국 시간 사용
+            now = now_kst()
             new_note = {
                 '날짜': now.strftime("%Y-%m-%d"),
                 '시간': now.strftime("%H:%M:%S"),
@@ -318,7 +323,7 @@ elif mode == "💬 코드/대화 이력":
         summary = st.text_input("📝 핵심 요약 (AI 추천)", value=summary_val)
         if st.button("🚀 이력 저장하기", type="primary"):
             if final_content and summary:
-                now = now_kst()  # ✅ 한국 시간
+                now = now_kst()
                 new_chat = {
                     '날짜': now.strftime("%Y-%m-%d"),
                     '시간': now.strftime("%H:%M:%S"),
@@ -363,7 +368,7 @@ elif mode == "💬 코드/대화 이력":
 elif mode == "📊 일일 리포트":
     st.title("📊 일일 업무 리포트 자동 생성")
     st.info("오늘 하루 동안 **[📝 업무 기록하기]**에 남긴 메모들을 AI가 취합해서 보고서를 써줍니다.")
-    today_str = today_kst_str()  # ✅ 한국 기준 오늘 날짜
+    today_str = today_kst_str()
     df = load_sheet("notes").fillna("")
     today_notes = df[df['날짜'] == today_str]
     if not today_notes.empty:
