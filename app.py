@@ -346,8 +346,15 @@ if mode == "📝 업무 기록하기":
 # ------------------------------------------
 # [모드 2] 코드/대화 이력
 # ------------------------------------------
+# ------------------------------------------
+# [모드 2] 코드/대화 이력
+# ------------------------------------------
 elif mode == "💬 코드/대화 이력":
     st.title("💬 코드 변경 이력 자동 추적")
+    
+    # 세션 상태 초기화
+    if 'ai_summary' not in st.session_state:
+        st.session_state.ai_summary = ""
     
     with st.expander("📥 대화 내용 가져오기", expanded=True):
         tab1, tab2 = st.tabs(["📝 직접 붙여넣기", "📂 파일 업로드"])
@@ -388,29 +395,42 @@ elif mode == "💬 코드/대화 이력":
 {final_content[:20000]}"""
                         
                         response = model.generate_content(prompt)
-                        ai_summary = response.text.strip()
-                        
+                        st.session_state.ai_summary = response.text.strip()
                         st.success("✅ 요약 완료!")
-                        st.markdown(ai_summary)
-                        
-                        if st.button("💾 저장"):
-                            now = now_kst()
-                            new_chat = {
-                                '날짜': now.strftime("%Y-%m-%d"),
-                                '시간': now.strftime("%H:%M:%S"),
-                                '주제': ai_summary.split('\n')[0][:100],
-                                '전체내용': ai_summary
-                            }
-                            
-                            df_chat = load_sheet("chats")
-                            df_chat = pd.concat([pd.DataFrame([new_chat]), df_chat], ignore_index=True)
-                            
-                            if save_sheet(df_chat, "chats"):
-                                st.success("저장 완료!")
-                                st.rerun()
+                        st.rerun()
                         
                     except Exception as e:
                         st.error(f"AI 오류: {e}")
+    
+    # 요약 결과 표시 및 저장
+    if st.session_state.ai_summary:
+        st.divider()
+        st.subheader("📄 요약 결과")
+        st.markdown(st.session_state.ai_summary)
+        
+        col1, col2 = st.columns([1, 5])
+        with col1:
+            if st.button("💾 저장", type="primary"):
+                now = now_kst()
+                new_chat = {
+                    '날짜': now.strftime("%Y-%m-%d"),
+                    '시간': now.strftime("%H:%M:%S"),
+                    '주제': st.session_state.ai_summary.split('\n')[0][:100],
+                    '전체내용': st.session_state.ai_summary
+                }
+                
+                df_chat = load_sheet("chats")
+                df_chat = pd.concat([pd.DataFrame([new_chat]), df_chat], ignore_index=True)
+                
+                if save_sheet(df_chat, "chats"):
+                    st.success("저장 완료!")
+                    st.session_state.ai_summary = ""
+                    st.rerun()
+        
+        with col2:
+            if st.button("🔄 새로 요약"):
+                st.session_state.ai_summary = ""
+                st.rerun()
     
     st.divider()
     st.subheader("📚 이력")
@@ -434,6 +454,7 @@ elif mode == "💬 코드/대화 이력":
                     st.markdown(row['전체내용'])
     else:
         st.info("기록 없음")
+
 
 # ------------------------------------------
 # [모드 3] 일일 리포트
