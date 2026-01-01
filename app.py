@@ -368,7 +368,7 @@ elif mode == "💬 코드/대화 이력":
             if st.button("🤖 자동 요약", type="primary"):
                 with st.spinner("분석 중..."):
                     try:
-                        model = genai.GenerativeModel('gemini-2.0-flash')
+                        model = genai.GenerativeModel('gemini-2.5-flash')
                         
                         prompt = f"""다음 대화를 분석해서 정리해줘:
 
@@ -456,7 +456,7 @@ elif mode == "📊 일일 리포트":
             if gemini_api_key:
                 with st.spinner("생성 중..."):
                     try:
-                        model = genai.GenerativeModel('gemini-2.0-flash')
+                        model = genai.GenerativeModel('gemini-2.5-flash')
                         prompt = f"다음 업무 로그를 보고서로 작성해줘:\n\n{notes_text}"
                         response = model.generate_content(prompt)
                         st.markdown(response.text)
