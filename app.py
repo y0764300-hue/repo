@@ -176,8 +176,7 @@ if mode == "📝 업무 기록하기":
     config_df = load_sheet("config")
     
     if config_df.empty or len(config_df) == 0:
-        st.error("⚠️ config 시트가 비어있습니다. Google Sheets에서 데이터를 복구해주세요.")
-        st.info("📋 config 시트 필수 컬럼: 메뉴명, 시트정보, 트리거정보, 업무설명, 메일발송설정")
+        st.error("⚠️ config 시트가 비어있습니다.")
         st.stop()
     
     menu_list = config_df['메뉴명'].tolist()
@@ -192,7 +191,7 @@ if mode == "📝 업무 기록하기":
     
     st.header(f"{selected_menu_name}")
     
-    with st.expander("ℹ️ 업무 설명 (클릭하여 편집)", expanded=True):
+    with st.expander("ℹ️ 업무 설명", expanded=True):
         description = str(current_row['업무설명'])
         new_desc = st.text_area("설명 수정", value=description, height=70, label_visibility="collapsed")
         if new_desc != description:
@@ -222,6 +221,7 @@ if mode == "📝 업무 기록하기":
 
     if current_row['메일발송설정']:
         st.info("📧 이 업무는 **메일 발송** 프로세스가 포함되어 있습니다.")
+    
     st.divider()
     
     st.write("###### 📝 기록 유형")
@@ -235,8 +235,7 @@ if mode == "📝 업무 기록하기":
     elif "문제점" in note_type:
         ph = "발생한 오류나 이슈 기록"
     
-    st.text_area("내용 입력", height=100, placeholder=ph,
-                 key=input_key, label_visibility="collapsed")
+    st.text_area("내용 입력", height=100, placeholder=ph, key=input_key, label_visibility="collapsed")
     
     uploaded_image = st.file_uploader("📸 캡처 이미지 첨부 (선택)", 
                                       type=['png', 'jpg', 'jpeg'],
@@ -248,16 +247,13 @@ if mode == "📝 업무 기록하기":
             image_url = ""
             
             if uploaded_image is not None:
-                with st.spinner("📤 Google Drive에 이미지 업로드 중..."):
+                with st.spinner("📤 이미지 업로드 중..."):
                     now = now_kst()
                     ext = uploaded_image.name.split('.')[-1]
                     filename = f"{now.strftime('%Y%m%d_%H%M%S')}_{selected_menu_name}.{ext}"
-                    
                     image_url = upload_to_drive(uploaded_image, filename)
                     if image_url:
                         st.success("✅ 이미지 업로드 완료!")
-                    else:
-                        st.warning("⚠️ 이미지 업로드 실패 (기록은 저장됨)")
             
             now = now_kst()
             new_note = {
@@ -280,7 +276,6 @@ if mode == "📝 업무 기록하기":
             st.warning("⚠️ 내용을 입력해주세요.")
 
     st.divider()
-    
     st.subheader(f"📊 히스토리")
 
     df = load_sheet("notes").fillna("")
@@ -336,68 +331,109 @@ elif mode == "💬 코드/대화 이력":
         tab1, tab2 = st.tabs(["📝 직접 붙여넣기", "📂 파일 업로드"])
         
         with tab1:
-            raw_text_input = st.text_area("전체 대화 내용 (Ctrl+V)", height=200,
-                                          placeholder="Perplexity 대화 전체 복사 붙여넣기")
+            raw_text_input = st.text_area("전체 대화 내용", height=200, placeholder="대화 붙여넣기")
         
         with tab2:
-            uploaded_file = st.file_uploader(
-                "마크다운(.md) 또는 텍스트(.txt) 파일", type=["md", "txt"]
-            )
+            uploaded_file = st.file_uploader("파일 업로드", type=["md", "txt"])
             file_content = ""
             if uploaded_file is not None:
                 file_content = uploaded_file.getvalue().decode("utf-8")
-                st.success(f"📂 파일 로드됨: {uploaded_file.name}")
+                st.success(f"파일 로드됨: {uploaded_file.name}")
         
-        st.divider()
         final_content = raw_text_input if raw_text_input else file_content
         
         if final_content and gemini_api_key:
-            if st.button("🤖 자동 변경 이력 생성", type="primary"):
-                with st.spinner("대화 분석 중... 🔍"):
+            if st.button("🤖 자동 요약", type="primary"):
+                with st.spinner("분석 중..."):
                     try:
-                        available_models = [
-                            m.name for m in genai.list_models()
-                            if 'generateContent' in m.supported_generation_methods
-                        ]
-                        model_name = available_models[0] if available_models else 'gemini-pro'
-                        model = genai.GenerativeModel(model_name)
+                        model = genai.GenerativeModel('gemini-pro')
                         
-                        prompt_summary = f"""
-다음 대화에서 "내가 해결하려던 문제"를 3줄 이내로 요약해줘.
-
-[대화]
-{final_content[:20000]}
-"""
-                        response_summary = model.generate_content(prompt_summary)
-                        problem_summary = response_summary.text.strip()
+                        prompt = f"다음 대화를 요약해서 정리해줘:\n\n{final_content[:20000]}"
+                        response = model.generate_content(prompt)
+                        ai_summary = response.text.strip()
                         
-                        prompt_questions = f"""
-다음 대화에서 "내가 한 질문들"만 추출해줘. 각 질문 앞에 번호 붙여서 리스트로.
-
-[대화]
-{final_content[:20000]}
-"""
-                        response_questions = model.generate_content(prompt_questions)
-                        questions = response_questions.text.strip()
+                        st.success("✅ 요약 완료!")
+                        st.markdown(ai_summary)
                         
-                        prompt_files = f"""
-다음 대화에서 수정된 파일명과 변경 내용을 추출해줘.
-
-형식:
-- **파일명**
-  - 함수명: 변경 내용 (한 줄)
-
-[대화]
-{final_content[:20000]}
-"""
-                        response_files = model.generate_content(prompt_files)
-                        file_changes = response_files.text.strip()
+                        if st.button("💾 저장"):
+                            now = now_kst()
+                            new_chat = {
+                                '날짜': now.strftime("%Y-%m-%d"),
+                                '시간': now.strftime("%H:%M:%S"),
+                                '주제': ai_summary[:100],
+                                '전체내용': ai_summary
+                            }
+                            
+                            df_chat = load_sheet("chats")
+                            df_chat = pd.concat([pd.DataFrame([new_chat]), df_chat], ignore_index=True)
+                            
+                            if save_sheet(df_chat, "chats"):
+                                st.success("저장 완료!")
+                                st.rerun()
                         
-                        prompt_code = f"""
-다음 대화에서 "변경 전/후" 코드를 찾아서 정리해줘.
+                    except Exception as e:
+                        st.error(f"AI 오류: {e}")
+    
+    st.divider()
+    st.subheader("📚 이력")
+    
+    df_chat = load_sheet("chats").fillna("")
+    if not df_chat.empty:
+        for idx in df_chat.index[::-1]:
+            row = df_chat.loc[idx]
+            with st.container(border=True):
+                col1, col2 = st.columns([0.85, 0.15])
+                with col1:
+                    st.markdown(f"**{row['주제']}**")
+                    st.caption(f"{row['날짜']} {row['시간']}")
+                with col2:
+                    if st.button("🗑️", key=f"del_{idx}"):
+                        df_chat = df_chat.drop(idx)
+                        if save_sheet(df_chat, "chats"):
+                            st.toast("삭제됨!")
+                            st.rerun()
+                with st.expander("내용"):
+                    st.markdown(row['전체내용'])
+    else:
+        st.info("기록 없음")
 
-형식:
-### 변경 위치: 파일명 - 함수명
-```python
-# 변경 전
-기존코드
+# ------------------------------------------
+# [모드 3] 일일 리포트
+# ------------------------------------------
+elif mode == "📊 일일 리포트":
+    st.title("📊 일일 리포트")
+    
+    today_str = today_kst_str()
+    df = load_sheet("notes").fillna("")
+    today_notes = df[df['날짜'] == today_str]
+    
+    if not today_notes.empty:
+        st.write(f"📅 {today_str} - {len(today_notes)}건")
+        
+        notes_text = ""
+        for idx, row in today_notes.iterrows():
+            notes_text += f"- [{row['메뉴']}] {row['내용']}\n"
+        
+        if st.button("🚀 AI 리포트 생성"):
+            if gemini_api_key:
+                with st.spinner("생성 중..."):
+                    try:
+                        model = genai.GenerativeModel('gemini-pro')
+                        prompt = f"다음 업무 로그를 보고서로 작성해줘:\n\n{notes_text}"
+                        response = model.generate_content(prompt)
+                        st.markdown(response.text)
+                    except Exception as e:
+                        st.error(f"오류: {e}")
+    else:
+        st.warning("오늘 기록 없음")
+
+# ------------------------------------------
+# [모드 4] 설정 관리
+# ------------------------------------------
+elif mode == "⚙️ 메뉴/설정 관리":
+    st.title("⚙️ 설정 관리")
+    config_df = load_sheet("config")
+    edited_df = st.data_editor(config_df, num_rows="dynamic", use_container_width=True, hide_index=True)
+    if st.button("저장", type="primary"):
+        if save_sheet(edited_df, "config"):
+            st.success("저장 완료!")
