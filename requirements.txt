@@ -1,7 +1,7 @@
 streamlit
 pandas
 pytz
-google-genai
+google-generativeai
 streamlit-gsheets
 google-auth
 google-api-python-client
