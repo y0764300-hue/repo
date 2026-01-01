@@ -25,7 +25,7 @@ def today_kst_str():
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 # ==========================================
-# 📌 데이터 로드/저장 함수 (구글 시트 버전)
+# 📌 데이터 로드/저장 함수
 # ==========================================
 def load_sheet(worksheet_name):
     """구글 시트에서 데이터를 불러오는 함수"""
@@ -56,37 +56,6 @@ def save_sheet(df, worksheet_name):
     except Exception as e:
         st.error(f"시트 저장 실패 ({worksheet_name}): {e}")
         return False
-
-# ==========================================
-# 📌 초기 데이터 생성 (✅ 덮어쓰기 방지)
-# ==========================================
-config_df = load_sheet("config")
-if config_df.empty or len(config_df) == 0:
-    st.warning("⚠️ config 시트가 비어있습니다. 기본 데이터로 표시합니다.")
-    default_data = {
-        "메뉴명": ["📦 피킹지시", "🔍 재고조회", "🚛 입고처리", "🏷️ 바코드 관리"],
-        "시트정보": [
-            "검증결과, Log, 12월사본, 자재 정보, 소요 정보, DB, 볼트 상세, 단가",
-            "전사재고, 실시간재고, 불량현황, 3공장 재고",
-            "입고검수, 반품이력, 협력사정보, 품질리포트",
-            "라벨이력, ZPL템플릿, 프린터설정"
-        ],
-        "트리거정보": [
-            "함수: runSmartUpdate(), 매일 06시~07시 자동실행",
-            "함수: checkStock(), 수정 시 실행(OnEdit)",
-            "함수: registerItem(), 폼 제출 시 실행",
-            "함수: printLabel(), 버튼 클릭 시 실행"
-        ],
-        "업무설명": [
-            "피킹 리스트를 생성하고 현장에 전달하는 업무. 오전 9시 전까지 완료 필수.",
-            "ERP와 실물 재고를 비교하여 차이점을 파악하는 업무.",
-            "협력사로부터 입고된 자재를 검수하고 시스템에 등록함.",
-            "부품 식별표(바코드)를 출력하여 적재된 자재에 부착."
-        ],
-        "메일발송설정": [True, False, False, True]
-    }
-    config_df = pd.DataFrame(default_data)
-    # ✅ save_sheet 제거 (시트 덮어쓰기 방지)
 
 # ==========================================
 # 2. 스타일 (CSS)
@@ -134,6 +103,13 @@ mode = st.sidebar.radio("모드 선택", ["📝 업무 기록하기", "💬 코�
 # ------------------------------------------
 if mode == "📝 업무 기록하기":
     config_df = load_sheet("config")
+    
+    # ✅ config 시트 비어있으면 경고하고 중단 (덮어쓰기 절대 안함)
+    if config_df.empty or len(config_df) == 0:
+        st.error("⚠️ config 시트가 비어있습니다. Google Sheets에서 데이터를 복구해주세요.")
+        st.info("📋 config 시트 필수 컬럼: 메뉴명, 시트정보, 트리거정보, 업무설명, 메일발송설정")
+        st.stop()
+    
     menu_list = config_df['메뉴명'].tolist()
     selected_menu_name = st.sidebar.radio("업무 선택", menu_list)
     
@@ -192,7 +168,6 @@ if mode == "📝 업무 기록하기":
     st.text_area("내용 입력", height=100, placeholder=ph,
                  key=input_key, label_visibility="collapsed")
     
-    # ✅ 저장 버튼 크래시 방지
     if st.button("💾 기록 저장", type="primary"):
         safe_content = st.session_state.get(input_key, "")
         if safe_content.strip():
