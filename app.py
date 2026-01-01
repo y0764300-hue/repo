@@ -5,6 +5,11 @@ import pytz
 import os
 import google.generativeai as genai
 from streamlit_gsheets import GSheetsConnection
+from google.oauth2 import service_account
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaIoBaseUpload
+import io
+from PIL import Image
 
 # ==========================================
 # 📌 공통: KST 타임존 설정
@@ -20,6 +25,55 @@ def today_kst_str():
     return now_kst().strftime("%Y-%m-%d")
 
 # ==========================================
+# 📌 Google Drive 업로드 함수
+# ==========================================
+def upload_to_drive(image_file, filename):
+    """이미지를 Google Drive에 업로드하고 공개 URL 반환"""
+    try:
+        # 서비스 계정 인증
+        credentials = service_account.Credentials.from_service_account_info(
+            st.secrets["gcp_service_account"],
+            scopes=['https://www.googleapis.com/auth/drive.file']
+        )
+        service = build('drive', 'v3', credentials=credentials)
+        
+        folder_id = st.secrets["GOOGLE_DRIVE_FOLDER_ID"]
+        
+        # 파일 메타데이터
+        file_metadata = {
+            'name': filename,
+            'parents': [folder_id]
+        }
+        
+        # 이미지 업로드
+        media = MediaIoBaseUpload(
+            io.BytesIO(image_file.read()),
+            mimetype=image_file.type,
+            resumable=True
+        )
+        
+        file = service.files().create(
+            body=file_metadata,
+            media_body=media,
+            fields='id, webViewLink, webContentLink'
+        ).execute()
+        
+        # 파일을 공개로 설정
+        service.permissions().create(
+            fileId=file['id'],
+            body={'type': 'anyone', 'role': 'reader'}
+        ).execute()
+        
+        # 직접 이미지 URL 생성
+        image_url = f"https://drive.google.com/uc?export=view&id={file['id']}"
+        
+        return image_url
+        
+    except Exception as e:
+        st.error(f"Drive 업로드 실패: {e}")
+        return None
+
+# ==========================================
 # 📌 구글 시트 연결 설정
 # ==========================================
 conn = st.connection("gsheets", type=GSheetsConnection)
@@ -28,26 +82,21 @@ conn = st.connection("gsheets", type=GSheetsConnection)
 # 📌 데이터 로드/저장 함수
 # ==========================================
 def load_sheet(worksheet_name):
-    """구글 시트에서 데이터를 불러오는 함수 (캐시 완전 무효화)"""
+    """구글 시트에서 데이터를 불러오는 함수"""
     try:
-        # ✅ ttl=1로 캐시 최소화
-        df = conn.read(worksheet=worksheet_name, ttl=1)
-        
-        # ✅ 완전 복사본 생성
+        df = conn.read(worksheet=worksheet_name, ttl=0)
         df = df.copy()
         
         if df.empty or df.shape[1] == 0:
             if worksheet_name == "notes":
-                return pd.DataFrame(columns=['날짜', '시간', '메뉴', '유형', '내용'])
+                return pd.DataFrame(columns=['날짜', '시간', '메뉴', '유형', '내용', '이미지'])
             elif worksheet_name == "chats":
                 return pd.DataFrame(columns=['날짜', '시간', '주제', '전체내용'])
             elif worksheet_name == "config":
                 return pd.DataFrame(columns=["메뉴명", "시트정보", "트리거정보", "업무설명", "메일발송설정"])
         
-        # ✅ 빈 값 처리
         df = df.fillna("")
         
-        # ✅ 모든 컬럼 문자열 변환 + 인코딩 안전 처리
         for col in df.columns:
             try:
                 df[col] = df[col].apply(
@@ -62,7 +111,7 @@ def load_sheet(worksheet_name):
     except Exception as e:
         st.error(f"시트 읽기 실패 ({worksheet_name}): {e}")
         if worksheet_name == "notes":
-            return pd.DataFrame(columns=['날짜', '시간', '메뉴', '유형', '내용'])
+            return pd.DataFrame(columns=['날짜', '시간', '메뉴', '유형', '내용', '이미지'])
         elif worksheet_name == "chats":
             return pd.DataFrame(columns=['날짜', '시간', '주제', '전체내용'])
         elif worksheet_name == "config":
@@ -89,6 +138,7 @@ st.markdown("""
     .stButton button { height: 34px; padding: 0 8px; min-width: 0px; margin: 0px; }
     .stTextArea textarea { overflow-y: hidden; }
     [data-testid="column"] { padding: 0px !important; }
+    .note-image { max-width: 100%; border-radius: 8px; margin-top: 10px; border: 1px solid #ddd; cursor: pointer; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -116,12 +166,12 @@ with st.sidebar:
         else:
             st.warning("API 키가 없습니다.")
     
-    # ✅ 캐시 초기화 버튼 추가
     st.divider()
     if st.button("🔄 캐시 초기화"):
+        st.session_state.clear()
         st.cache_data.clear()
         st.cache_resource.clear()
-        st.success("캐시가 초기화되었습니다!")
+        st.success("초기화 완료!")
         st.rerun()
 
 mode = st.sidebar.radio("모드 선택", ["📝 업무 기록하기", "💬 코드/대화 이력", "📊 일일 리포트", "⚙️ 메뉴/설정 관리"])
@@ -132,7 +182,6 @@ mode = st.sidebar.radio("모드 선택", ["📝 업무 기록하기", "💬 코�
 if mode == "📝 업무 기록하기":
     config_df = load_sheet("config")
     
-    # ✅ config 시트 비어있으면 경고하고 중단
     if config_df.empty or len(config_df) == 0:
         st.error("⚠️ config 시트가 비어있습니다. Google Sheets에서 데이터를 복구해주세요.")
         st.info("📋 config 시트 필수 컬럼: 메뉴명, 시트정보, 트리거정보, 업무설명, 메일발송설정")
@@ -196,16 +245,38 @@ if mode == "📝 업무 기록하기":
     st.text_area("내용 입력", height=100, placeholder=ph,
                  key=input_key, label_visibility="collapsed")
     
+    # ✅ 이미지 업로드 추가
+    uploaded_image = st.file_uploader("📸 캡처 이미지 첨부 (선택)", 
+                                      type=['png', 'jpg', 'jpeg'],
+                                      key=f"img_{selected_menu_name}")
+    
     if st.button("💾 기록 저장", type="primary"):
         safe_content = st.session_state.get(input_key, "")
         if safe_content.strip():
+            image_url = ""
+            
+            # 이미지 업로드 처리
+            if uploaded_image is not None:
+                with st.spinner("📤 Google Drive에 이미지 업로드 중..."):
+                    # 파일명: 날짜_시간_메뉴명.확장자
+                    now = now_kst()
+                    ext = uploaded_image.name.split('.')[-1]
+                    filename = f"{now.strftime('%Y%m%d_%H%M%S')}_{selected_menu_name}.{ext}"
+                    
+                    image_url = upload_to_drive(uploaded_image, filename)
+                    if image_url:
+                        st.success("✅ 이미지 업로드 완료!")
+                    else:
+                        st.warning("⚠️ 이미지 업로드 실패 (기록은 저장됨)")
+            
             now = now_kst()
             new_note = {
                 '날짜': now.strftime("%Y-%m-%d"),
                 '시간': now.strftime("%H:%M:%S"),
                 '메뉴': selected_menu_name,
                 '유형': note_type,
-                '내용': safe_content
+                '내용': safe_content,
+                '이미지': image_url
             }
             
             df_note = load_sheet("notes")
@@ -220,52 +291,24 @@ if mode == "📝 업무 기록하기":
 
     st.divider()
     
-    col_h_title, col_h_filter, col_h_action = st.columns([0.5, 0.3, 0.2])
-    with col_h_title:
-        st.subheader(f"📊 히스토리")
-    with col_h_filter:
-        filter_options = ["💡 아이디어", "✅ 업데이트", "🔥 문제점"]
-        selected_filters = st.multiselect("유형 필터", filter_options,
-                                          default=filter_options, label_visibility="collapsed")
-    with col_h_action:
-        # ✅ 2025년 데이터 일괄 삭제 버튼
-        if st.button("🗑️ 2025년 삭제", help="2025년 모든 기록 삭제"):
-            df = load_sheet("notes")
-            df_remain = df[~df['날짜'].str.startswith('2025')]
-            if save_sheet(df_remain, "notes"):
-                st.toast("2025년 기록이 삭제되었습니다!", icon="🗑️")
-                st.rerun()
+    st.subheader(f"📊 히스토리")
 
     df = load_sheet("notes").fillna("")
-    
-    # ✅ 2025년 데이터 완전 제거
-    df = df[~df['날짜'].str.startswith('2025')]
-    
+    df = df[~df['날짜'].str.contains('2025', na=False)]
     df_filtered = df[df['메뉴'] == selected_menu_name]
-    mask = df_filtered['유형'].apply(lambda x: any(f in x for f in selected_filters))
-    df_final = df_filtered[mask]
-    my_notes_idx = df_final.index.tolist()[::-1]
     
-    if my_notes_idx:
-        for idx in my_notes_idx:
+    if not df_filtered.empty:
+        for idx in df_filtered.index[::-1]:
             row = df.loc[idx]
             
-            # ✅ 안전하게 문자열 변환
             try:
                 note_date = str(row['날짜']).strip()
                 note_time = str(row['시간']).strip()
                 note_type = str(row['유형']).strip()
                 note_content = str(row['내용']).strip()
+                note_image = str(row.get('이미지', '')).strip() if '이미지' in row else ""
                 
-                # ✅ 빈 내용 완전 차단
-                if (not note_content or 
-                    note_content == 'nan' or 
-                    note_content == '' or 
-                    len(note_content) < 2):
-                    continue
-                
-                # ✅ 2025년 데이터 재확인 차단
-                if '2025' in note_date:
+                if not note_content or note_content == 'nan' or len(note_content) < 2:
                     continue
                     
             except Exception:
@@ -280,66 +323,49 @@ if mode == "📝 업무 기록하기":
                     st.markdown(f"**{icon} [{note_type}] {note_date} {note_time}**")
                 
                 with col_btn:
-                    edit_mode_key = f"edit_mode_{idx}"
-                    is_editing = st.session_state.get(edit_mode_key, False)
-                    
-                    b1, b2 = st.columns([1, 1], gap="small")
-                    
-                    with b1:
-                        if is_editing:
-                            if st.button("💾", key=f"save_{idx}", help="저장"):
-                                new_content = st.session_state.get(f"txt_{idx}", note_content)
-                                df.at[idx, '내용'] = new_content
-                                if save_sheet(df, "notes"):
-                                    st.session_state[edit_mode_key] = False
-                                    st.toast("수정 완료!", icon="💾")
-                                    st.rerun()
-                        else:
-                            if st.button("✏️", key=f"edit_{idx}", help="수정"):
-                                st.session_state[edit_mode_key] = True
-                                st.rerun()
-                    with b2:
-                        if st.button("🗑️", key=f"del_{idx}", help="삭제"):
-                            df = df.drop(idx)
-                            if save_sheet(df, "notes"):
-                                st.toast("삭제됨!", icon="🗑️")
-                                st.rerun()
-
-                if is_editing:
-                    st.text_area("내용 수정", value=note_content,
-                                 key=f"txt_{idx}", height=120,
-                                 label_visibility="collapsed")
-                else:
-                    display_text = note_content.replace("\n", "  \n")
-                    st.markdown(display_text)
+                    if st.button("🗑️", key=f"del_{idx}", help="삭제"):
+                        df = df.drop(idx)
+                        if save_sheet(df, "notes"):
+                            st.toast("삭제됨!", icon="🗑️")
+                            st.rerun()
+                
+                st.markdown(note_content.replace("\n", "  \n"))
+                
+                # ✅ 이미지 표시
+                if note_image and note_image != 'nan' and note_image.startswith('http'):
+                    st.image(note_image, use_container_width=True)
     else:
         st.info("조건에 맞는 기록이 없습니다.")
 
 # ------------------------------------------
-# [모드 2] 코드/대화 이력
+# [모드 2] 코드/대화 이력 (AI 강화)
 # ------------------------------------------
 elif mode == "💬 코드/대화 이력":
     st.title("💬 코드 수정 이력 관리 (AI)")
+    
     with st.expander("📥 대화 내용 가져오기", expanded=True):
         tab1, tab2 = st.tabs(["📝 직접 붙여넣기", "📂 파일 업로드"])
+        
         with tab1:
             raw_text_input = st.text_area("전체 대화 내용 (Ctrl+V)", height=200,
-                                          placeholder="내용 붙여넣기")
+                                          placeholder="Perplexity 대화 복사해서 붙여넣기")
+        
         with tab2:
             uploaded_file = st.file_uploader(
-                "마크다운(.md) 또는 텍스트(.txt) 파일 드래그", type=["md", "txt"]
+                "마크다운(.md) 또는 텍스트(.txt) 파일", type=["md", "txt"]
             )
             file_content = ""
             if uploaded_file is not None:
-                stringio = uploaded_file.getvalue().decode("utf-8")
-                file_content = stringio
+                file_content = uploaded_file.getvalue().decode("utf-8")
                 st.success(f"📂 파일 로드됨: {uploaded_file.name}")
+        
         st.divider()
         final_content = raw_text_input if raw_text_input else file_content
         ai_summary = ""
+        
         if final_content and gemini_api_key:
-            if st.button("🤖 AI 자동 요약 실행"):
-                with st.spinner("AI 모델 찾는 중..."):
+            if st.button("🤖 AI 자동 요약 실행", type="primary"):
+                with st.spinner("AI가 대화 내용을 분석 중... 🔍"):
                     try:
                         available_models = [
                             m.name for m in genai.list_models()
@@ -347,36 +373,76 @@ elif mode == "💬 코드/대화 이력":
                         ]
                         model_name = available_models[0] if available_models else 'gemini-pro'
                         model = genai.GenerativeModel(model_name)
-                        response = model.generate_content(
-                            f"다음 내용을 50자 이내로 핵심만 요약해줘 (코드 수정 사항 위주로): \n\n{final_content[:10000]}"
-                        )
+                        
+                        # ✅ 강화된 프롬프트
+                        prompt = f"""
+다음은 나와 AI의 대화 내용이야. 이 대화를 완벽하게 요약해줘.
+
+[요약 형식]
+**제목**: [한 줄 요약 (10자 이내)]
+
+**질문 요약**:
+- 내가 무엇을 물어봤는지
+
+**해결 과정**:
+- AI가 제시한 해결 방법
+- 시도했던 방법들
+- 발생했던 문제점
+
+**최종 해결책**:
+- 어떤 코드를 수정했는지
+- 어떤 파일을 변경했는지
+- 핵심 코드 스니펫 (있다면)
+
+**결과**:
+- 문제가 해결됐는지
+- 남은 이슈
+
+[대화 내용]
+{final_content[:15000]}
+"""
+                        
+                        response = model.generate_content(prompt)
                         ai_summary = response.text.strip()
-                        st.toast(f"AI 요약 완료 ({model_name})", icon="🤖")
+                        st.success(f"✅ AI 요약 완료 ({model_name})")
+                        
+                        # 요약 결과 미리보기
+                        with st.container(border=True):
+                            st.markdown("### 📋 AI 요약 결과")
+                            st.markdown(ai_summary)
+                        
                     except Exception as e:
                         st.error(f"AI 호출 실패: {e}")
+        
         summary_val = ai_summary if ai_summary else (
-            f"파일 업로드: {uploaded_file.name}" if uploaded_file else ""
+            f"파일: {uploaded_file.name}" if uploaded_file else ""
         )
-        summary = st.text_input("📝 핵심 요약 (AI 추천)", value=summary_val)
+        
+        summary = st.text_area("📝 최종 요약 (수정 가능)", value=summary_val, height=150)
+        
         if st.button("🚀 이력 저장하기", type="primary"):
             if final_content and summary:
                 now = now_kst()
                 new_chat = {
                     '날짜': now.strftime("%Y-%m-%d"),
                     '시간': now.strftime("%H:%M:%S"),
-                    '주제': summary,
-                    '전체내용': final_content
+                    '주제': summary.split('\n')[0][:100],  # 첫 줄을 주제로
+                    '전체내용': f"## 요약\n\n{summary}\n\n## 원본 대화\n\n{final_content}"
                 }
+                
                 df_chat = load_sheet("chats")
-                df_chat = pd.concat([pd.DataFrame([new_chat]), df_chat],
-                                    ignore_index=True)
+                df_chat = pd.concat([pd.DataFrame([new_chat]), df_chat], ignore_index=True)
+                
                 if save_sheet(df_chat, "chats"):
                     st.success("✅ 저장되었습니다!")
                     st.balloons()
+                    st.rerun()
             else:
                 st.warning("내용이 비어있습니다.")
+    
     st.divider()
     st.subheader("📚 수정 히스토리")
+    
     df_chat = load_sheet("chats").fillna("")
     if not df_chat.empty:
         for idx in df_chat.index[::-1]:
@@ -387,17 +453,16 @@ elif mode == "💬 코드/대화 이력":
                     st.markdown(f"**[{row['날짜']}] {row['주제']}**")
                     st.caption(f"🕒 {row['시간']}")
                 with c2:
-                    b_del, _ = st.columns([1, 1])
-                    with b_del:
-                        if st.button("🗑️", key=f"del_chat_{idx}", help="삭제"):
-                            df_chat = df_chat.drop(idx)
-                            if save_sheet(df_chat, "chats"):
-                                st.toast("삭제됨!", icon="🗑️")
-                                st.rerun()
-                with st.expander("내용 보기"):
-                    st.code(row['전체내용'])
+                    if st.button("🗑️", key=f"del_chat_{idx}", help="삭제"):
+                        df_chat = df_chat.drop(idx)
+                        if save_sheet(df_chat, "chats"):
+                            st.toast("삭제됨!", icon="🗑️")
+                            st.rerun()
+                
+                with st.expander("📖 전체 내용 보기"):
+                    st.markdown(row['전체내용'])
     else:
-        st.caption("기록이 없습니다.")
+        st.info("기록이 없습니다.")
 
 # ------------------------------------------
 # [모드 3] 일일 리포트
@@ -405,17 +470,22 @@ elif mode == "💬 코드/대화 이력":
 elif mode == "📊 일일 리포트":
     st.title("📊 일일 업무 리포트 자동 생성")
     st.info("오늘 하루 동안 **[📝 업무 기록하기]**에 남긴 메모들을 AI가 취합해서 보고서를 써줍니다.")
+    
     today_str = today_kst_str()
     df = load_sheet("notes").fillna("")
     today_notes = df[df['날짜'] == today_str]
+    
     if not today_notes.empty:
         st.write(f"📅 **{today_str}** 총 **{len(today_notes)}건**의 업무 기록이 있습니다.")
+        
         notes_text = ""
         for idx, row in today_notes.iterrows():
             safe_content = str(row['내용']) if str(row['내용']) != "" else "(내용 없음)"
             notes_text += f"- [{row['메뉴']}] ({row['유형']}): {safe_content}\n"
+        
         with st.expander("📋 오늘 기록된 원본 데이터 보기"):
             st.text(notes_text)
+        
         if st.button("🚀 AI 리포트 생성하기", type="primary"):
             if gemini_api_key:
                 with st.spinner("보고서 작성 중... ✍️"):
@@ -426,6 +496,7 @@ elif mode == "📊 일일 리포트":
                         ]
                         model_name = available_models[0] if available_models else 'gemini-pro'
                         model = genai.GenerativeModel(model_name)
+                        
                         prompt = (
                             "다음은 오늘 나의 자재관리 업무 로그야. "
                             "이 내용을 바탕으로 팀장님께 보고할 '일일 업무 보고서'를 작성해줘.\n\n"
@@ -436,8 +507,10 @@ elif mode == "📊 일일 리포트":
                             "4. 한국어로 작성해줘.\n\n"
                             f"[업무 로그]\n{notes_text}"
                         )
+                        
                         response = model.generate_content(prompt)
                         report_content = response.text
+                        
                         st.subheader("📑 생성된 업무 보고서")
                         st.markdown(
                             f'<div class="report-box">{report_content}</div>',
