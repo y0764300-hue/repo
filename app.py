@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timedelta
 import pytz
 import os
 import google.generativeai as genai
@@ -310,18 +310,41 @@ elif mode == "💬 대화 이력":
                 del st.session_state["summary_topic"]
                 st.rerun()
     
-    # 히스토리 표시
+    # 히스토리 표시 (날짜 필터 포함)
     st.divider()
     st.subheader("📚 대화 히스토리")
     chats_df = load_sheet("chats")
     
     if not chats_df.empty:
-        # 2026년 데이터만 필터링
-        chats_df = chats_df[chats_df["날짜"].astype(str).str.startswith("2026")]
+        # 날짜 필터
+        col1, col2 = st.columns([1, 3])
+        with col1:
+            filter_option = st.selectbox(
+                "기간 선택",
+                ["전체 보기", "오늘만", "이번 주", "이번 달"]
+            )
         
-        for idx, row in chats_df.iloc[::-1].iterrows():
-            with st.expander(f"📅 {row['날짜']} {row['시간']} - {row['주제']}"):
-                st.markdown(row['전체내용'])
+        # 필터링 로직
+        filtered_df = chats_df.copy()
+        
+        if filter_option == "오늘만":
+            filtered_df = filtered_df[filtered_df["날짜"] == today_kst_str()]
+        elif filter_option == "이번 주":
+            week_ago = (now_kst() - timedelta(days=7)).strftime("%Y-%m-%d")
+            filtered_df = filtered_df[filtered_df["날짜"] >= week_ago]
+        elif filter_option == "이번 달":
+            this_month = now_kst().strftime("%Y-%m")
+            filtered_df = filtered_df[filtered_df["날짜"].astype(str).str.startswith(this_month)]
+        
+        # 전체 표시 (최신순)
+        if not filtered_df.empty:
+            for idx, row in filtered_df.iloc[::-1].iterrows():
+                with st.expander(f"📅 {row['날짜']} {row['시간']} - {row['주제']}"):
+                    st.markdown(row['전체내용'])
+        else:
+            st.info(f"📭 {filter_option} 기록이 없습니다")
+    else:
+        st.info("📭 아직 대화 기록이 없습니다")
 
 # ================== 모드 3: 일일 리포트 ==================
 elif mode == "📊 일일 리포트":
@@ -342,7 +365,7 @@ elif mode == "📊 일일 리포트":
                     st.markdown(f"{row['유형']} **{row['시간']}**")
                     st.markdown(row['내용'])
                 with col2:
-                    if row['이미지'] and str(row['이미지']) != 'nan':
+                    if row['이미지'] and str(row['이미지']) != 'nan' and str(row['이미지']).strip():
                         st.markdown(f"[🖼️ 이미지 보기]({row['이미지']})")
             st.divider()
     else:
