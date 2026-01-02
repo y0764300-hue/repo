@@ -6,3 +6,4 @@ st-gsheets-connection
 google-auth
 google-api-python-client
 Pillow
+streamlit-paste-button
