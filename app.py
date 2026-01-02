@@ -29,7 +29,7 @@ conn = st.connection("gsheets", type=GSheetsConnection)
 def load_sheet(worksheet):
     """시트 로드"""
     try:
-        df = conn.read(worksheet=worksheet)
+        df = conn.read(worksheet=worksheet, ttl=0)
         for col in df.columns:
             if df[col].dtype == 'object':
                 df[col] = df[col].astype(str)
@@ -86,6 +86,25 @@ if "GEMINI_API_KEY" in st.secrets:
 st.set_page_config(page_title="스마트 업무 비서", page_icon="📝", layout="wide")
 st.title("📝 스마트 업무 비서")
 
+# ========== 사이드바: API 상태 & 캐시 초기화 ==========
+with st.sidebar:
+    st.markdown("### 🔑 AI 설정")
+    if "GEMINI_API_KEY" in st.secrets:
+        st.success("🟢 Gemini AI 연결됨")
+    else:
+        st.warning("🔴 API 키 없음")
+    
+    st.markdown("---")
+    
+    if st.button("🔄 캐시 초기화", help="데이터 새로고침"):
+        st.session_state.clear()
+        st.cache_data.clear()
+        st.cache_resource.clear()
+        st.success("✅ 캐시 초기화 완료!")
+        st.rerun()
+    
+    st.markdown("---")
+
 # 사이드바 모드 선택
 mode = st.sidebar.radio(
     "모드 선택",
@@ -113,7 +132,6 @@ if mode == "📝 업무 기록하기":
         if paste_result.image_data is not None:
             st.success("✅ 클립보드 이미지 준비됨!")
             st.image(paste_result.image_data, width=200)
-            # 세션에 저장
             st.session_state["pending_image"] = paste_result.image_data
         
         st.divider()
@@ -124,7 +142,6 @@ if mode == "📝 업무 기록하기":
             note_type = st.radio("유형", ["💡 아이디어", "✅ 업데이트"], horizontal=True)
             content = st.text_area("내용", height=150)
             
-            # 파일 업로드
             uploaded_file = st.file_uploader(
                 "또는 파일 업로드",
                 type=['png', 'jpg', 'jpeg'],
@@ -138,17 +155,15 @@ if mode == "📝 업무 기록하기":
                     # 이미지 처리
                     image_url = None
                     
-                    # 클립보드 이미지 우선 (세션에서 가져오기)
+                    # 클립보드 이미지 우선
                     if "pending_image" in st.session_state:
                         timestamp = now_kst().strftime("%Y%m%d_%H%M%S")
                         filename = f"clipboard_{timestamp}.png"
                         
-                        # PIL Image를 BytesIO로 변환
                         img_byte_arr = io.BytesIO()
                         st.session_state["pending_image"].save(img_byte_arr, format='PNG')
                         img_byte_arr.seek(0)
                         
-                        # Drive 업로드용 가짜 파일 객체 생성
                         class FakeFile:
                             def __init__(self, data):
                                 self.data = data
@@ -158,11 +173,8 @@ if mode == "📝 업무 기록하기":
                         
                         fake_file = FakeFile(img_byte_arr.getvalue())
                         image_url = upload_to_drive(fake_file, filename)
-                        
-                        # 세션에서 삭제
                         del st.session_state["pending_image"]
                     
-                    # 파일 업로드 이미지
                     elif uploaded_file is not None:
                         timestamp = now_kst().strftime("%Y%m%d_%H%M%S")
                         filename = f"{timestamp}_{uploaded_file.name}"
@@ -183,11 +195,87 @@ if mode == "📝 업무 기록하기":
                     
                     if save_sheet(updated_df, "notes"):
                         st.success("✅ 저장 완료!")
-                        st.rerun()  # 클립보드 이미지 초기화
+                        st.rerun()
                     else:
                         st.error("❌ 저장 실패")
                 else:
                     st.warning("⚠️ 내용을 입력하세요")
+        
+        # ========== 업무별 히스토리 (필터링 + 편집 + 삭제) ==========
+        st.divider()
+        st.subheader("📚 업무 기록 히스토리")
+        
+        notes_df = load_sheet("notes")
+        
+        if not notes_df.empty:
+            # 필터링 옵션
+            col1, col2 = st.columns([1, 1])
+            with col1:
+                filter_menu = st.selectbox(
+                    "업무 필터",
+                    ["전체 보기"] + menu_list
+                )
+            with col2:
+                filter_type = st.selectbox(
+                    "유형 필터",
+                    ["전체", "💡 아이디어", "✅ 업데이트"]
+                )
+            
+            # 필터 적용
+            filtered_df = notes_df.copy()
+            if filter_menu != "전체 보기":
+                filtered_df = filtered_df[filtered_df["메뉴"] == filter_menu]
+            if filter_type != "전체":
+                filtered_df = filtered_df[filtered_df["유형"] == filter_type]
+            
+            if not filtered_df.empty:
+                for idx, row in filtered_df.iloc[::-1].iterrows():
+                    col1, col2 = st.columns([5, 1])
+                    
+                    with col1:
+                        with st.expander(f"{row['유형']} [{row['메뉴']}] {row['날짜']} {row['시간']}"):
+                            # 편집 모드
+                            if f"edit_{idx}" in st.session_state and st.session_state[f"edit_{idx}"]:
+                                new_content = st.text_area(
+                                    "내용 수정",
+                                    value=row['내용'],
+                                    key=f"edit_content_{idx}",
+                                    height=150
+                                )
+                                
+                                col_save, col_cancel = st.columns(2)
+                                with col_save:
+                                    if st.button("💾 저장", key=f"save_{idx}", type="primary"):
+                                        notes_df.loc[idx, '내용'] = new_content
+                                        if save_sheet(notes_df, "notes"):
+                                            st.success("✅ 수정 완료!")
+                                            st.session_state[f"edit_{idx}"] = False
+                                            st.rerun()
+                                with col_cancel:
+                                    if st.button("❌ 취소", key=f"cancel_{idx}"):
+                                        st.session_state[f"edit_{idx}"] = False
+                                        st.rerun()
+                            else:
+                                # 일반 보기 모드
+                                st.markdown(row['내용'])
+                                if row['이미지'] and str(row['이미지']) != 'nan' and str(row['이미지']).strip():
+                                    st.markdown(f"[🖼️ 이미지 보기]({row['이미지']})")
+                    
+                    with col2:
+                        if f"edit_{idx}" not in st.session_state or not st.session_state[f"edit_{idx}"]:
+                            if st.button("✏️", key=f"edit_btn_{idx}", help="수정"):
+                                st.session_state[f"edit_{idx}"] = True
+                                st.rerun()
+                        
+                        if st.button("🗑️", key=f"del_{idx}", help="삭제"):
+                            notes_df = notes_df.drop(idx)
+                            if save_sheet(notes_df, "notes"):
+                                st.success("✅ 삭제 완료!")
+                                st.rerun()
+            else:
+                st.info("📭 조건에 맞는 기록이 없습니다")
+        else:
+            st.info("📭 아직 기록이 없습니다")
     else:
         st.warning("설정 메뉴에서 업무를 먼저 등록하세요")
 
@@ -278,10 +366,14 @@ elif mode == "💬 대화 이력":
         col1, col2, col3 = st.columns([2, 1, 1])
         
         with col1:
-            related_menu = st.selectbox(
-                "관련 업무 (선택)",
-                ["없음"] + load_sheet("config")["메뉴명"].tolist()
-            )
+            config_df = load_sheet("config")
+            if not config_df.empty:
+                related_menu = st.selectbox(
+                    "관련 업무 (선택)",
+                    ["없음"] + config_df["메뉴명"].tolist()
+                )
+            else:
+                related_menu = "없음"
         
         with col2:
             if st.button("💾 이중 저장 (chats + notes)", type="primary"):
@@ -324,7 +416,7 @@ elif mode == "💬 대화 이력":
                 del st.session_state["summary_topic"]
                 st.rerun()
     
-    # 히스토리 표시 (날짜 필터 포함)
+    # 히스토리 표시 (날짜 필터 + 삭제)
     st.divider()
     st.subheader("📚 대화 히스토리")
     chats_df = load_sheet("chats")
@@ -353,8 +445,18 @@ elif mode == "💬 대화 이력":
         # 전체 표시 (최신순)
         if not filtered_df.empty:
             for idx, row in filtered_df.iloc[::-1].iterrows():
-                with st.expander(f"📅 {row['날짜']} {row['시간']} - {row['주제']}"):
-                    st.markdown(row['전체내용'])
+                col1, col2 = st.columns([5, 1])
+                
+                with col1:
+                    with st.expander(f"📅 {row['날짜']} {row['시간']} - {row['주제']}"):
+                        st.markdown(row['전체내용'])
+                
+                with col2:
+                    if st.button("🗑️", key=f"del_chat_{idx}", help="삭제"):
+                        chats_df = chats_df.drop(idx)
+                        if save_sheet(chats_df, "chats"):
+                            st.success("✅ 삭제 완료!")
+                            st.rerun()
         else:
             st.info(f"📭 {filter_option} 기록이 없습니다")
     else:
@@ -369,6 +471,7 @@ elif mode == "📊 일일 리포트":
     today_notes = notes_df[notes_df["날짜"] == today_str]
     
     if not today_notes.empty:
+        # 업무별로 정리
         for menu in today_notes["메뉴"].unique():
             st.subheader(f"📌 {menu}")
             menu_notes = today_notes[today_notes["메뉴"] == menu]
@@ -382,6 +485,42 @@ elif mode == "📊 일일 리포트":
                     if row['이미지'] and str(row['이미지']) != 'nan' and str(row['이미지']).strip():
                         st.markdown(f"[🖼️ 이미지 보기]({row['이미지']})")
             st.divider()
+        
+        # AI 요약 버튼
+        st.divider()
+        if "GEMINI_API_KEY" in st.secrets:
+            if st.button("🤖 오늘 업무 AI 요약하기", type="primary"):
+                all_content = "\n\n".join([
+                    f"[{row['메뉴']}] {row['유형']}\n{row['내용']}"
+                    for idx, row in today_notes.iterrows()
+                ])
+                
+                prompt = f"""다음은 오늘({today_str}) 작성한 업무 기록입니다.
+이를 분석하여 다음 형식으로 요약해주세요:
+
+## 📊 업무별 요약
+- [업무1]: 주요 내용
+- [업무2]: 주요 내용
+
+## 💡 주요 성과
+- 성과 1
+- 성과 2
+
+## 🎯 내일 할 일
+- 할일 1
+- 할일 2
+
+업무 내용:
+{all_content[:30000]}
+"""
+                
+                try:
+                    model = genai.GenerativeModel('gemini-2.5-flash')
+                    response = model.generate_content(prompt)
+                    st.markdown("### 📄 AI 요약 결과")
+                    st.markdown(response.text)
+                except Exception as e:
+                    st.error(f"❌ 요약 실패: {e}")
     else:
         st.warning(f"📅 {today_str}에 작성된 업무 기록이 없습니다")
 
