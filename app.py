@@ -102,19 +102,29 @@ if mode == "📝 업무 기록하기":
     if not config_df.empty:
         menu_list = config_df["메뉴명"].tolist()
         
+        # 클립보드 이미지 붙여넣기 (Form 밖)
+        st.write("**🖼️ 이미지 추가 (선택)**")
+        paste_result = pbutton(
+            label="📋 클립보드에서 이미지 붙여넣기",
+            key="clipboard_paste"
+        )
+        
+        # 클립보드 이미지 미리보기
+        if paste_result.image_data is not None:
+            st.success("✅ 클립보드 이미지 준비됨!")
+            st.image(paste_result.image_data, width=200)
+            # 세션에 저장
+            st.session_state["pending_image"] = paste_result.image_data
+        
+        st.divider()
+        
         # 폼 사용으로 자동 초기화
         with st.form(key="note_form", clear_on_submit=True):
             selected_menu = st.selectbox("업무 선택", menu_list)
             note_type = st.radio("유형", ["💡 아이디어", "✅ 업데이트"], horizontal=True)
             content = st.text_area("내용", height=150)
             
-            # 클립보드 이미지 붙여넣기
-            st.write("**이미지 추가 (선택)**")
-            paste_result = pbutton(
-                label="📋 클립보드에서 이미지 붙여넣기",
-                key="clipboard_paste"
-            )
-            
+            # 파일 업로드
             uploaded_file = st.file_uploader(
                 "또는 파일 업로드",
                 type=['png', 'jpg', 'jpeg'],
@@ -128,14 +138,14 @@ if mode == "📝 업무 기록하기":
                     # 이미지 처리
                     image_url = None
                     
-                    # 클립보드 이미지 우선
-                    if paste_result.image_data is not None:
+                    # 클립보드 이미지 우선 (세션에서 가져오기)
+                    if "pending_image" in st.session_state:
                         timestamp = now_kst().strftime("%Y%m%d_%H%M%S")
                         filename = f"clipboard_{timestamp}.png"
                         
                         # PIL Image를 BytesIO로 변환
                         img_byte_arr = io.BytesIO()
-                        paste_result.image_data.save(img_byte_arr, format='PNG')
+                        st.session_state["pending_image"].save(img_byte_arr, format='PNG')
                         img_byte_arr.seek(0)
                         
                         # Drive 업로드용 가짜 파일 객체 생성
@@ -148,6 +158,9 @@ if mode == "📝 업무 기록하기":
                         
                         fake_file = FakeFile(img_byte_arr.getvalue())
                         image_url = upload_to_drive(fake_file, filename)
+                        
+                        # 세션에서 삭제
+                        del st.session_state["pending_image"]
                     
                     # 파일 업로드 이미지
                     elif uploaded_file is not None:
@@ -170,6 +183,7 @@ if mode == "📝 업무 기록하기":
                     
                     if save_sheet(updated_df, "notes"):
                         st.success("✅ 저장 완료!")
+                        st.rerun()  # 클립보드 이미지 초기화
                     else:
                         st.error("❌ 저장 실패")
                 else:
