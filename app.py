@@ -27,16 +27,37 @@ def today_kst_str():
 conn = st.connection("gsheets", type=GSheetsConnection)
 
 def load_sheet(worksheet):
-    """시트 로드"""
+    """시트 로드 - 안전한 버전"""
     try:
         df = conn.read(worksheet=worksheet, ttl=0)
+        
+        # None이거나 비어있는지 체크
+        if df is None or len(df) == 0:
+            if worksheet == "notes":
+                return pd.DataFrame(columns=['날짜', '시간', '메뉴', '유형', '내용', '이미지'])
+            elif worksheet == "chats":
+                return pd.DataFrame(columns=['날짜', '시간', '주제', '전체내용'])
+            elif worksheet == "config":
+                return pd.DataFrame(columns=["메뉴명", "시트정보", "트리거정보", "업무설명", "메일발송설정"])
+        
+        # 결측값 처리
+        df = df.fillna("")
+        
+        # 문자열 변환 및 정리
         for col in df.columns:
             if df[col].dtype == 'object':
-                df[col] = df[col].astype(str)
+                df[col] = df[col].astype(str).str.strip()
+        
         return df
+        
     except Exception as e:
-        st.error(f"시트 로드 실패: {e}")
-        return pd.DataFrame()
+        st.error(f"❌ 시트 로드 실패 ({worksheet}): {e}")
+        if worksheet == "notes":
+            return pd.DataFrame(columns=['날짜', '시간', '메뉴', '유형', '내용', '이미지'])
+        elif worksheet == "chats":
+            return pd.DataFrame(columns=['날짜', '시간', '주제', '전체내용'])
+        elif worksheet == "config":
+            return pd.DataFrame(columns=["메뉴명", "시트정보", "트리거정보", "업무설명", "메일발송설정"])
 
 def save_sheet(df, worksheet):
     """시트 저장"""
@@ -44,7 +65,7 @@ def save_sheet(df, worksheet):
         conn.update(worksheet=worksheet, data=df)
         return True
     except Exception as e:
-        st.error(f"저장 실패: {e}")
+        st.error(f"❌ 저장 실패 ({worksheet}): {e}")
         return False
 
 def upload_to_drive(image_file, filename):
@@ -58,12 +79,19 @@ def upload_to_drive(image_file, filename):
         
         file_metadata = {
             'name': filename,
-            'parents': [st.secrets["drive_folder_id"]]
+            'parents': [st.secrets["GOOGLE_DRIVE_FOLDER_ID"]]
         }
         
+        # 이미지 데이터 처리
+        if hasattr(image_file, 'read'):
+            image_data = image_file.read()
+            image_file.seek(0)
+        else:
+            image_data = image_file.getvalue()
+        
         media = MediaIoBaseUpload(
-            io.BytesIO(image_file.getvalue()),
-            mimetype=image_file.type,
+            io.BytesIO(image_data),
+            mimetype='image/png',
             resumable=True
         )
         
@@ -73,9 +101,16 @@ def upload_to_drive(image_file, filename):
             fields='id, webViewLink'
         ).execute()
         
-        return file.get('webViewLink')
+        # 공개 권한 설정
+        service.permissions().create(
+            fileId=file['id'],
+            body={'type': 'anyone', 'role': 'reader'}
+        ).execute()
+        
+        return f"https://drive.google.com/uc?export=view&id={file['id']}"
+        
     except Exception as e:
-        st.error(f"이미지 업로드 실패: {e}")
+        st.error(f"❌ 이미지 업로드 실패: {e}")
         return None
 
 # Gemini API 설정
@@ -118,45 +153,68 @@ if mode == "📝 업무 기록하기":
     # config 로드
     config_df = load_sheet("config")
     
-    if not config_df.empty:
-        menu_list = config_df["메뉴명"].tolist()
-        
-        # 클립보드 이미지 붙여넣기 (Form 밖)
-        st.write("**🖼️ 이미지 추가 (선택)**")
-        paste_result = pbutton(
-            label="📋 클립보드에서 이미지 붙여넣기",
-            key="clipboard_paste"
+    # 데이터 확인
+    if config_df.empty or len(config_df) == 0:
+        st.error("⚠️ config 시트를 불러올 수 없습니다!")
+        st.info("💡 사이드바의 '🔄 캐시 초기화' 버튼을 눌러주세요")
+        st.info("💡 또는 '⚙️ 메뉴/설정 관리'에서 업무를 등록하세요")
+        st.stop()
+    
+    # 메뉴명 컬럼 확인
+    if "메뉴명" not in config_df.columns:
+        st.error("❌ config 시트에 '메뉴명' 컬럼이 없습니다!")
+        st.stop()
+    
+    menu_list = config_df["메뉴명"].tolist()
+    
+    if len(menu_list) == 0:
+        st.warning("⚠️ 등록된 업무가 없습니다. 설정 메뉴에서 업무를 먼저 등록하세요.")
+        st.stop()
+    
+    # 성공 메시지
+    st.success(f"✅ {len(menu_list)}개 업무 로드 완료")
+    
+    # 클립보드 이미지 붙여넣기 (Form 밖)
+    st.write("**🖼️ 이미지 추가 (선택)**")
+    paste_result = pbutton(
+        label="📋 클립보드에서 이미지 붙여넣기 (Ctrl+V)",
+        key="clipboard_paste"
+    )
+    
+    # 클립보드 이미지 미리보기
+    if paste_result.image_data is not None:
+        st.success("✅ 클립보드 이미지 준비됨!")
+        st.image(paste_result.image_data, width=200)
+        st.session_state["pending_image"] = paste_result.image_data
+    
+    st.divider()
+    
+    # 폼 사용으로 자동 초기화
+    with st.form(key="note_form", clear_on_submit=True):
+        selected_menu = st.selectbox("📁 업무 선택", menu_list)
+        note_type = st.radio("🏷️ 유형", ["💡 아이디어", "✅ 업데이트", "🔥 문제점"], horizontal=True)
+        content = st.text_area(
+            "📝 내용", 
+            height=150, 
+            help="💡 Tip: 스크린샷 캡처 후 위의 '클립보드 붙여넣기' 버튼으로 이미지를 먼저 추가하세요!"
         )
         
-        # 클립보드 이미지 미리보기
-        if paste_result.image_data is not None:
-            st.success("✅ 클립보드 이미지 준비됨!")
-            st.image(paste_result.image_data, width=200)
-            st.session_state["pending_image"] = paste_result.image_data
+        uploaded_file = st.file_uploader(
+            "📎 또는 파일 업로드",
+            type=['png', 'jpg', 'jpeg'],
+            key="file_upload"
+        )
         
-        st.divider()
+        submit = st.form_submit_button("💾 저장", type="primary")
         
-        # 폼 사용으로 자동 초기화
-        with st.form(key="note_form", clear_on_submit=True):
-            selected_menu = st.selectbox("업무 선택", menu_list)
-            note_type = st.radio("유형", ["💡 아이디어", "✅ 업데이트", "🔥 문제점"], horizontal=True)
-            content = st.text_area("내용", height=150, help="💡 Tip: 스크린샷 캡처 후 Ctrl+V로 이미지를 먼저 붙여넣으세요!")
-            
-            uploaded_file = st.file_uploader(
-                "또는 파일 업로드",
-                type=['png', 'jpg', 'jpeg'],
-                key="file_upload"
-            )
-            
-            submit = st.form_submit_button("💾 저장", type="primary")
-            
-            if submit:
-                if content.strip():
-                    # 이미지 처리
-                    image_url = None
-                    
-                    # 클립보드 이미지 우선
-                    if "pending_image" in st.session_state:
+        if submit:
+            if content.strip():
+                # 이미지 처리
+                image_url = None
+                
+                # 클립보드 이미지 우선
+                if "pending_image" in st.session_state:
+                    with st.spinner("📤 이미지 업로드 중..."):
                         timestamp = now_kst().strftime("%Y%m%d_%H%M%S")
                         filename = f"clipboard_{timestamp}.png"
                         
@@ -174,36 +232,50 @@ if mode == "📝 업무 기록하기":
                         fake_file = FakeFile(img_byte_arr.getvalue())
                         image_url = upload_to_drive(fake_file, filename)
                         del st.session_state["pending_image"]
-                    
-                    elif uploaded_file is not None:
+                
+                elif uploaded_file is not None:
+                    with st.spinner("📤 이미지 업로드 중..."):
                         timestamp = now_kst().strftime("%Y%m%d_%H%M%S")
                         filename = f"{timestamp}_{uploaded_file.name}"
                         image_url = upload_to_drive(uploaded_file, filename)
-                    
-                    # notes 시트에 저장
-                    notes_df = load_sheet("notes")
-                    new_row = pd.DataFrame([{
-                        "날짜": today_kst_str(),
-                        "시간": now_kst().strftime("%H:%M:%S"),
-                        "메뉴": selected_menu,
-                        "유형": note_type,
-                        "내용": content,
-                        "이미지": image_url if image_url else ""
-                    }])
-                    
-                    updated_df = pd.concat([notes_df, new_row], ignore_index=True)
-                    
-                    if save_sheet(updated_df, "notes"):
-                        st.success("✅ 저장 완료!")
-                        st.rerun()
-                    else:
-                        st.error("❌ 저장 실패")
+                
+                # notes 시트에 저장
+                notes_df = load_sheet("notes")
+                new_row = pd.DataFrame([{
+                    "날짜": today_kst_str(),
+                    "시간": now_kst().strftime("%H:%M:%S"),
+                    "메뉴": selected_menu,
+                    "유형": note_type,
+                    "내용": content,
+                    "이미지": image_url if image_url else ""
+                }])
+                
+                updated_df = pd.concat([notes_df, new_row], ignore_index=True)
+                
+                if save_sheet(updated_df, "notes"):
+                    st.success("✅ 저장 완료!")
+                    st.rerun()
                 else:
-                    st.warning("⚠️ 내용을 입력하세요")
+                    st.error("❌ 저장 실패")
+            else:
+                st.warning("⚠️ 내용을 입력하세요")
+    
+    # 최근 히스토리 미리보기
+    st.divider()
+    st.subheader(f"📚 최근 기록 (전체는 '📋 전체 히스토리' 메뉴에서)")
+    
+    notes_df = load_sheet("notes")
+    if not notes_df.empty:
+        recent_notes = notes_df.head(5)
+        for idx, row in recent_notes.iterrows():
+            with st.expander(f"{row['유형']} [{row['메뉴']}] {row['날짜']} {row['시간']}"):
+                st.markdown(row['내용'])
+                if row['이미지'] and str(row['이미지']) != 'nan' and str(row['이미지']).strip():
+                    st.image(row['이미지'], use_container_width=True)
     else:
-        st.warning("설정 메뉴에서 업무를 먼저 등록하세요")
+        st.info("📭 아직 기록이 없습니다")
 
-# ================== 모드 2: 전체 히스토리 (신규) ==================
+# ================== 모드 2: 전체 히스토리 ==================
 elif mode == "📋 전체 히스토리":
     st.header("📋 전체 업무 히스토리")
     
@@ -302,16 +374,18 @@ elif mode == "📋 전체 히스토리":
                                     st.rerun()
         else:
             st.info("📭 조건에 맞는 기록이 없습니다")
-    else:
+    elif notes_df.empty:
         st.info("📭 아직 기록이 없습니다")
+    else:
+        st.error("⚠️ config 설정을 먼저 확인하세요")
 
 # ================== 모드 3: 대화 이력 ==================
 elif mode == "💬 대화 이력":
     st.header("💬 대화 이력")
     
     with st.form(key="chat_form", clear_on_submit=True):
-        chat_topic = st.text_input("주제/제목")
-        chat_content = st.text_area("대화 내용 (전체 복사 붙여넣기)", height=300)
+        chat_topic = st.text_input("📌 주제/제목")
+        chat_content = st.text_area("📝 대화 내용 (전체 복사 붙여넣기)", height=300)
         
         submit = st.form_submit_button("💾 저장", type="primary")
         
@@ -329,6 +403,7 @@ elif mode == "💬 대화 이력":
                 
                 if save_sheet(updated_df, "chats"):
                     st.success("✅ 저장 완료!")
+                    st.rerun()
                 else:
                     st.error("❌ 저장 실패")
             else:
@@ -379,6 +454,7 @@ elif mode == "💬 대화 이력":
                     st.session_state["summary_topic"] = f"{today_str} 일일 요약"
                     
                     st.success("✅ 요약 완료!")
+                    st.rerun()
                 except Exception as e:
                     st.error(f"❌ 요약 실패: {e}")
             else:
@@ -402,7 +478,7 @@ elif mode == "💬 대화 이력":
                 related_menu = "없음"
         
         with col2:
-            if st.button("💾 이중 저장 (chats + notes)", type="primary"):
+            if st.button("💾 이중 저장", type="primary"):
                 summary = st.session_state["ai_summary"]
                 topic = st.session_state["summary_topic"]
                 
@@ -431,7 +507,7 @@ elif mode == "💬 대화 이력":
                     notes_updated = pd.concat([notes_df, note_row], ignore_index=True)
                     save_sheet(notes_updated, "notes")
                 
-                st.success("✅ 이중 저장 완료!")
+                st.success("✅ 저장 완료!")
                 del st.session_state["ai_summary"]
                 del st.session_state["summary_topic"]
                 st.rerun()
@@ -505,7 +581,7 @@ elif mode == "📊 일일 리포트":
                     st.markdown(row['내용'])
                 with col2:
                     if row['이미지'] and str(row['이미지']) != 'nan' and str(row['이미지']).strip():
-                        st.markdown(f"[🖼️ 이미지 보기]({row['이미지']})")
+                        st.markdown(f"[🖼️ 이미지]({row['이미지']})")
             st.divider()
         
         st.divider()
@@ -548,15 +624,21 @@ elif mode == "📊 일일 리포트":
 # ================== 모드 5: 설정 관리 ==================
 elif mode == "⚙️ 메뉴/설정 관리":
     st.title("⚙️ 설정 관리")
+    
     config_df = load_sheet("config")
     
-    edited_df = st.data_editor(
-        config_df,
-        num_rows="dynamic",
-        use_container_width=True,
-        hide_index=True
-    )
-    
-    if st.button("💾 저장", type="primary"):
-        if save_sheet(edited_df, "config"):
-            st.success("✅ 설정이 저장되었습니다!")
+    if not config_df.empty:
+        edited_df = st.data_editor(
+            config_df,
+            num_rows="dynamic",
+            use_container_width=True,
+            hide_index=True
+        )
+        
+        if st.button("💾 저장", type="primary"):
+            if save_sheet(edited_df, "config"):
+                st.success("✅ 설정이 저장되었습니다!")
+                st.rerun()
+    else:
+        st.warning("⚠️ config 시트가 비어있습니다")
+        st.info("구글 시트에서 직접 데이터를 입력한 후 '🔄 캐시 초기화'를 눌러주세요")
