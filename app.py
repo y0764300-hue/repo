@@ -383,35 +383,157 @@ elif mode == "📋 전체 히스토리":
 elif mode == "💬 대화 이력":
     st.header("💬 대화 이력")
     
-    with st.form(key="chat_form", clear_on_submit=True):
-        chat_topic = st.text_input("📌 주제/제목")
-        chat_content = st.text_area("📝 대화 내용 (전체 복사 붙여넣기)", height=300)
+    # 대화 내용 입력 섹션
+    with st.expander("📥 대화 내용 가져오기", expanded=True):
+        tab1, tab2 = st.tabs(["📝 직접 붙여넣기", "📂 파일 업로드"])
         
-        submit = st.form_submit_button("💾 저장", type="primary")
+        with tab1:
+            with st.form(key="chat_form_manual", clear_on_submit=True):
+                chat_topic = st.text_input("📌 주제/제목")
+                chat_content = st.text_area("📝 대화 내용 (전체 복사 붙여넣기)", height=300)
+                
+                submit_manual = st.form_submit_button("💾 저장", type="primary")
+                
+                if submit_manual:
+                    if chat_topic.strip() and chat_content.strip():
+                        chats_df = load_sheet("chats")
+                        new_row = pd.DataFrame([{
+                            "날짜": today_kst_str(),
+                            "시간": now_kst().strftime("%H:%M:%S"),
+                            "주제": chat_topic,
+                            "전체내용": chat_content
+                        }])
+                        
+                        updated_df = pd.concat([chats_df, new_row], ignore_index=True)
+                        
+                        if save_sheet(updated_df, "chats"):
+                            st.success("✅ 저장 완료!")
+                            st.rerun()
+                        else:
+                            st.error("❌ 저장 실패")
+                    else:
+                        st.warning("⚠️ 주제와 내용을 모두 입력하세요")
         
-        if submit:
-            if chat_topic.strip() and chat_content.strip():
-                chats_df = load_sheet("chats")
-                new_row = pd.DataFrame([{
-                    "날짜": today_kst_str(),
-                    "시간": now_kst().strftime("%H:%M:%S"),
-                    "주제": chat_topic,
-                    "전체내용": chat_content
-                }])
+        with tab2:
+            uploaded_file = st.file_uploader(
+                "📂 파일 업로드 (.txt, .md)", 
+                type=["txt", "md"],
+                help="대화 내용이 저장된 텍스트 파일을 업로드하세요"
+            )
+            
+            if uploaded_file is not None:
+                try:
+                    # 파일 내용 읽기
+                    file_content = uploaded_file.getvalue().decode("utf-8")
+                    
+                    st.success(f"✅ 파일 로드 완료: {uploaded_file.name}")
+                    
+                    with st.form(key="chat_form_file", clear_on_submit=False):
+                        # 파일명을 기본 주제로 사용
+                        default_topic = uploaded_file.name.replace('.txt', '').replace('.md', '')
+                        
+                        file_topic = st.text_input(
+                            "📌 주제/제목", 
+                            value=default_topic,
+                            key="file_topic"
+                        )
+                        
+                        # 파일 내용 미리보기
+                        st.text_area(
+                            "📝 파일 내용 미리보기", 
+                            value=file_content[:1000] + ("..." if len(file_content) > 1000 else ""),
+                            height=150,
+                            disabled=True
+                        )
+                        
+                        st.info(f"📊 전체 길이: {len(file_content)} 자")
+                        
+                        col1, col2 = st.columns([1, 1])
+                        
+                        with col1:
+                            submit_file = st.form_submit_button("💾 파일 내용 저장", type="primary")
+                        
+                        with col2:
+                            submit_ai = st.form_submit_button("🤖 AI 요약 후 저장")
+                        
+                        if submit_file:
+                            if file_topic.strip():
+                                chats_df = load_sheet("chats")
+                                new_row = pd.DataFrame([{
+                                    "날짜": today_kst_str(),
+                                    "시간": now_kst().strftime("%H:%M:%S"),
+                                    "주제": file_topic,
+                                    "전체내용": file_content
+                                }])
+                                
+                                updated_df = pd.concat([chats_df, new_row], ignore_index=True)
+                                
+                                if save_sheet(updated_df, "chats"):
+                                    st.success("✅ 파일 내용 저장 완료!")
+                                    st.rerun()
+                            else:
+                                st.warning("⚠️ 주제를 입력하세요")
+                        
+                        if submit_ai:
+                            if "GEMINI_API_KEY" not in st.secrets:
+                                st.error("❌ AI 기능을 사용하려면 API 키가 필요합니다")
+                            elif file_topic.strip():
+                                with st.spinner("🤖 AI 요약 중..."):
+                                    try:
+                                        model = genai.GenerativeModel('gemini-2.5-flash')
+                                        
+                                        prompt = f"""다음 대화를 분석해서 정리해줘:
+
+## 📌 주요 주제
+(핵심 주제 3줄 요약)
+
+## 💬 주요 대화 내용
+- 질문 1
+- 답변 1
+- 질문 2
+- 답변 2
+
+## 📝 코드/파일 변경사항
+(있다면)
+
+## 🎯 결론 및 다음 단계
+(최종 결과)
+
+[대화 내용]
+{file_content[:20000]}
+"""
+                                        
+                                        response = model.generate_content(prompt)
+                                        summary = response.text
+                                        
+                                        # 요약 결과 저장
+                                        chats_df = load_sheet("chats")
+                                        new_row = pd.DataFrame([{
+                                            "날짜": today_kst_str(),
+                                            "시간": now_kst().strftime("%H:%M:%S"),
+                                            "주제": f"[AI 요약] {file_topic}",
+                                            "전체내용": summary
+                                        }])
+                                        
+                                        updated_df = pd.concat([chats_df, new_row], ignore_index=True)
+                                        
+                                        if save_sheet(updated_df, "chats"):
+                                            st.success("✅ AI 요약 저장 완료!")
+                                            st.markdown("### 📄 요약 결과")
+                                            st.markdown(summary)
+                                            st.rerun()
+                                    
+                                    except Exception as e:
+                                        st.error(f"❌ AI 요약 실패: {e}")
+                            else:
+                                st.warning("⚠️ 주제를 입력하세요")
                 
-                updated_df = pd.concat([chats_df, new_row], ignore_index=True)
-                
-                if save_sheet(updated_df, "chats"):
-                    st.success("✅ 저장 완료!")
-                    st.rerun()
-                else:
-                    st.error("❌ 저장 실패")
-            else:
-                st.warning("⚠️ 주제와 내용을 모두 입력하세요")
+                except Exception as e:
+                    st.error(f"❌ 파일 읽기 실패: {e}")
     
     # AI 요약 기능
     st.divider()
-    st.subheader("🤖 AI 요약")
+    st.subheader("🤖 오늘 대화 전체 AI 요약")
     
     if "GEMINI_API_KEY" in st.secrets:
         if st.button("📋 오늘 대화 AI 요약하기"):
@@ -459,6 +581,8 @@ elif mode == "💬 대화 이력":
                     st.error(f"❌ 요약 실패: {e}")
             else:
                 st.warning("⚠️ 오늘 기록이 없습니다")
+    else:
+        st.warning("🔴 AI 기능을 사용하려면 API 키가 필요합니다")
     
     # AI 요약 결과 표시 및 저장
     if "ai_summary" in st.session_state:
