@@ -414,85 +414,91 @@ elif mode == "💬 대화 이력":
                     else:
                         st.warning("⚠️ 주제와 내용을 모두 입력하세요")
         
+        # 🔻 여기부터 전부 한 단계 들여쓰기 (with tab2: 내부)
         with tab2:
-    uploaded_file = st.file_uploader(
-        "📂 파일 업로드 (.txt, .md)", 
-        type=["txt", "md"],
-        help="대화 내용이 저장된 텍스트 파일을 업로드하세요"
-    )
-    
-    if uploaded_file is not None:
-        try:
-            # 파일 내용 읽기
-            file_content = uploaded_file.getvalue().decode("utf-8")
+            uploaded_file = st.file_uploader(
+                "📂 파일 업로드 (.txt, .md)", 
+                type=["txt", "md"],
+                help="대화 내용이 저장된 텍스트 파일을 업로드하세요"
+            )
             
-            st.success(f"✅ 파일 로드 완료: {uploaded_file.name}")
-            st.info(f"📊 전체 길이: {len(file_content):,} 자")
-            
-            # 파일이 너무 크면 경고
-            if len(file_content) > 50000:
-                st.warning(f"⚠️ 파일이 매우 큽니다 ({len(file_content):,}자). AI 요약 시 최대 50,000자만 처리됩니다.")
-            
-            with st.form(key="chat_form_file", clear_on_submit=False):
-                # 파일명을 기본 주제로 사용
-                default_topic = uploaded_file.name.replace('.txt', '').replace('.md', '')
-                
-                file_topic = st.text_input(
-                    "📌 주제/제목", 
-                    value=default_topic,
-                    key="file_topic"
-                )
-                
-                # 파일 내용 미리보기
-                preview_length = min(2000, len(file_content))
-                st.text_area(
-                    "📝 파일 내용 미리보기", 
-                    value=file_content[:preview_length] + ("..." if len(file_content) > preview_length else ""),
-                    height=200,
-                    disabled=True
-                )
-                
-                col1, col2, col3 = st.columns([1, 1, 1])
-                
-                with col1:
-                    submit_file = st.form_submit_button("💾 전체 내용 저장", type="primary")
-                
-                with col2:
-                    submit_ai = st.form_submit_button("🤖 AI 요약 후 저장")
-                
-                with col3:
-                    submit_split = st.form_submit_button("✂️ 분할 요약 (긴 파일)")
-                
-                if submit_file:
-                    if file_topic.strip():
-                        chats_df = load_sheet("chats")
-                        new_row = pd.DataFrame([{
-                            "날짜": today_kst_str(),
-                            "시간": now_kst().strftime("%H:%M:%S"),
-                            "주제": file_topic,
-                            "전체내용": file_content
-                        }])
+            if uploaded_file is not None:
+                try:
+                    # 파일 내용 읽기
+                    file_content = uploaded_file.getvalue().decode("utf-8")
+                    
+                    st.success(f"✅ 파일 로드 완료: {uploaded_file.name}")
+                    st.info(f"📊 전체 길이: {len(file_content):,} 자")
+                    
+                    # 파일이 너무 크면 경고
+                    if len(file_content) > 50000:
+                        st.warning(
+                            f"⚠️ 파일이 매우 큽니다 ({len(file_content):,}자). "
+                            "AI 요약 시 최대 50,000자만 처리됩니다."
+                        )
+                    
+                    with st.form(key="chat_form_file", clear_on_submit=False):
+                        # 파일명을 기본 주제로 사용
+                        default_topic = uploaded_file.name.replace('.txt', '').replace('.md', '')
                         
-                        updated_df = pd.concat([chats_df, new_row], ignore_index=True)
+                        file_topic = st.text_input(
+                            "📌 주제/제목", 
+                            value=default_topic,
+                            key="file_topic"
+                        )
                         
-                        if save_sheet(updated_df, "chats"):
-                            st.success("✅ 전체 내용 저장 완료!")
-                            st.rerun()
-                    else:
-                        st.warning("⚠️ 주제를 입력하세요")
-                
-                if submit_ai:
-                    if "GEMINI_API_KEY" not in st.secrets:
-                        st.error("❌ AI 기능을 사용하려면 API 키가 필요합니다")
-                    elif file_topic.strip():
-                        with st.spinner("🤖 AI 요약 중... (최대 50,000자)"):
-                            try:
-                                model = genai.GenerativeModel('gemini-2.5-flash')
+                        # 파일 내용 미리보기
+                        preview_length = min(2000, len(file_content))
+                        st.text_area(
+                            "📝 파일 내용 미리보기", 
+                            value=file_content[:preview_length] + (
+                                "..." if len(file_content) > preview_length else ""
+                            ),
+                            height=200,
+                            disabled=True
+                        )
+                        
+                        col1, col2, col3 = st.columns([1, 1, 1])
+                        
+                        with col1:
+                            submit_file = st.form_submit_button("💾 전체 내용 저장", type="primary")
+                        
+                        with col2:
+                            submit_ai = st.form_submit_button("🤖 AI 요약 후 저장")
+                        
+                        with col3:
+                            submit_split = st.form_submit_button("✂️ 분할 요약 (긴 파일)")
+                        
+                        if submit_file:
+                            if file_topic.strip():
+                                chats_df = load_sheet("chats")
+                                new_row = pd.DataFrame([{
+                                    "날짜": today_kst_str(),
+                                    "시간": now_kst().strftime("%H:%M:%S"),
+                                    "주제": file_topic,
+                                    "전체내용": file_content
+                                }])
                                 
-                                # 최대 50,000자로 제한
-                                content_to_analyze = file_content[:50000]
+                                updated_df = pd.concat([chats_df, new_row], ignore_index=True)
                                 
-                                prompt = f"""다음 대화를 분석해서 정리해줘:
+                                if save_sheet(updated_df, "chats"):
+                                    st.success("✅ 전체 내용 저장 완료!")
+                                    st.rerun()
+                            else:
+                                st.warning("⚠️ 주제를 입력하세요")
+                        
+                        if submit_ai:
+                            if "GEMINI_API_KEY" not in st.secrets:
+                                st.error("❌ AI 기능을 사용하려면 API 키가 필요합니다")
+                            elif file_topic.strip():
+                                with st.spinner("🤖 AI 요약 중... (최대 50,000자)"):
+                                    try:
+                                        model = genai.GenerativeModel('gemini-2.5-flash')
+                                        
+                                        # 최대 50,000자로 제한
+                                        content_to_analyze = file_content[:50000]
+                                        
+                                        prompt = f"""다음 대화를 분석해서 정리해줘:
 
 ## 📌 주요 주제
 (핵심 주제 3줄 요약)
@@ -510,57 +516,60 @@ elif mode == "💬 대화 이력":
 [대화 내용]
 {content_to_analyze}
 """
-                                
-                                response = model.generate_content(prompt)
-                                summary = response.text
-                                
-                                # 요약 결과 저장
-                                chats_df = load_sheet("chats")
-                                new_row = pd.DataFrame([{
-                                    "날짜": today_kst_str(),
-                                    "시간": now_kst().strftime("%H:%M:%S"),
-                                    "주제": f"[AI 요약] {file_topic}",
-                                    "전체내용": summary
-                                }])
-                                
-                                updated_df = pd.concat([chats_df, new_row], ignore_index=True)
-                                
-                                if save_sheet(updated_df, "chats"):
-                                    st.success("✅ AI 요약 저장 완료!")
-                                    st.markdown("### 📄 요약 결과")
-                                    st.markdown(summary)
+                                        
+                                        response = model.generate_content(prompt)
+                                        summary = response.text
+                                        
+                                        # 요약 결과 저장
+                                        chats_df = load_sheet("chats")
+                                        new_row = pd.DataFrame([{
+                                            "날짜": today_kst_str(),
+                                            "시간": now_kst().strftime("%H:%M:%S"),
+                                            "주제": f"[AI 요약] {file_topic}",
+                                            "전체내용": summary
+                                        }])
+                                        
+                                        updated_df = pd.concat([chats_df, new_row], ignore_index=True)
+                                        
+                                        if save_sheet(updated_df, "chats"):
+                                            st.success("✅ AI 요약 저장 완료!")
+                                            st.markdown("### 📄 요약 결과")
+                                            st.markdown(summary)
+                                            
+                                            if len(file_content) > 50000:
+                                                st.info(
+                                                    f"ℹ️ 전체 {len(file_content):,}자 중 50,000자만 분석되었습니다. "
+                                                    "전체 분석이 필요하면 '✂️ 분할 요약' 버튼을 사용하세요."
+                                                )
+                                            
+                                            st.rerun()
                                     
-                                    if len(file_content) > 50000:
-                                        st.info(f"ℹ️ 전체 {len(file_content):,}자 중 50,000자만 분석되었습니다. 전체 분석이 필요하면 '✂️ 분할 요약' 버튼을 사용하세요.")
-                                    
-                                    st.rerun()
-                            
-                            except Exception as e:
-                                st.error(f"❌ AI 요약 실패: {e}")
-                    else:
-                        st.warning("⚠️ 주제를 입력하세요")
-                
-                if submit_split:
-                    if "GEMINI_API_KEY" not in st.secrets:
-                        st.error("❌ AI 기능을 사용하려면 API 키가 필요합니다")
-                    elif file_topic.strip():
-                        with st.spinner("🤖 분할 요약 중... (여러 번 처리됩니다)"):
-                            try:
-                                model = genai.GenerativeModel('gemini-2.5-flash')
-                                
-                                # 파일을 40,000자씩 분할
-                                chunk_size = 40000
-                                chunks = []
-                                for i in range(0, len(file_content), chunk_size):
-                                    chunks.append(file_content[i:i+chunk_size])
-                                
-                                st.info(f"📊 총 {len(chunks)}개 부분으로 나누어 분석합니다...")
-                                
-                                summaries = []
-                                progress_bar = st.progress(0)
-                                
-                                for idx, chunk in enumerate(chunks):
-                                    prompt = f"""다음은 긴 대화의 {idx+1}/{len(chunks)} 부분입니다.
+                                    except Exception as e:
+                                        st.error(f"❌ AI 요약 실패: {e}")
+                            else:
+                                st.warning("⚠️ 주제를 입력하세요")
+                        
+                        if submit_split:
+                            if "GEMINI_API_KEY" not in st.secrets:
+                                st.error("❌ AI 기능을 사용하려면 API 키가 필요합니다")
+                            elif file_topic.strip():
+                                with st.spinner("🤖 분할 요약 중... (여러 번 처리됩니다)"):
+                                    try:
+                                        model = genai.GenerativeModel('gemini-2.5-flash')
+                                        
+                                        # 파일을 40,000자씩 분할
+                                        chunk_size = 40000
+                                        chunks = []
+                                        for i in range(0, len(file_content), chunk_size):
+                                            chunks.append(file_content[i:i+chunk_size])
+                                        
+                                        st.info(f"📊 총 {len(chunks)}개 부분으로 나누어 분석합니다...")
+                                        
+                                        summaries = []
+                                        progress_bar = st.progress(0)
+                                        
+                                        for idx, chunk in enumerate(chunks):
+                                            prompt = f"""다음은 긴 대화의 {idx+1}/{len(chunks)} 부분입니다.
 이 부분의 핵심 내용을 간단히 요약해주세요:
 
 - 주요 질문과 답변
@@ -570,15 +579,17 @@ elif mode == "💬 대화 이력":
 [대화 내용 {idx+1}/{len(chunks)}]
 {chunk}
 """
-                                    
-                                    response = model.generate_content(prompt)
-                                    summaries.append(f"### 📄 파트 {idx+1}/{len(chunks)}\n\n{response.text}")
-                                    progress_bar.progress((idx + 1) / len(chunks))
-                                
-                                # 최종 통합 요약
-                                combined = "\n\n---\n\n".join(summaries)
-                                
-                                final_prompt = f"""다음은 긴 대화를 {len(chunks)}개 부분으로 나눠 요약한 내용입니다.
+                                            
+                                            response = model.generate_content(prompt)
+                                            summaries.append(
+                                                f"### 📄 파트 {idx+1}/{len(chunks)}\n\n{response.text}"
+                                            )
+                                            progress_bar.progress((idx + 1) / len(chunks))
+                                        
+                                        # 최종 통합 요약
+                                        combined = "\n\n---\n\n".join(summaries)
+                                        
+                                        final_prompt = f"""다음은 긴 대화를 {len(chunks)}개 부분으로 나눠 요약한 내용입니다.
 이를 하나의 완전한 요약으로 통합해주세요:
 
 ## 📌 전체 주제
@@ -588,34 +599,37 @@ elif mode == "💬 대화 이력":
 
 {combined[:30000]}
 """
-                                
-                                final_response = model.generate_content(final_prompt)
-                                final_summary = final_response.text
-                                
-                                # 저장
-                                chats_df = load_sheet("chats")
-                                new_row = pd.DataFrame([{
-                                    "날짜": today_kst_str(),
-                                    "시간": now_kst().strftime("%H:%M:%S"),
-                                    "주제": f"[분할 요약] {file_topic}",
-                                    "전체내용": f"{final_summary}\n\n---\n\n### 📚 상세 부분별 요약\n\n{combined}"
-                                }])
-                                
-                                updated_df = pd.concat([chats_df, new_row], ignore_index=True)
-                                
-                                if save_sheet(updated_df, "chats"):
-                                    st.success(f"✅ 분할 요약 완료! ({len(chunks)}개 부분 분석)")
-                                    st.markdown("### 📄 통합 요약 결과")
-                                    st.markdown(final_summary)
-                                    st.rerun()
-                            
-                            except Exception as e:
-                                st.error(f"❌ 분할 요약 실패: {e}")
-                    else:
-                        st.warning("⚠️ 주제를 입력하세요")
-        
-        except Exception as e:
-            st.error(f"❌ 파일 읽기 실패: {e}")
+                                        
+                                        final_response = model.generate_content(final_prompt)
+                                        final_summary = final_response.text
+                                        
+                                        # 저장
+                                        chats_df = load_sheet("chats")
+                                        new_row = pd.DataFrame([{
+                                            "날짜": today_kst_str(),
+                                            "시간": now_kst().strftime("%H:%M:%S"),
+                                            "주제": f"[분할 요약] {file_topic}",
+                                            "전체내용": (
+                                                f"{final_summary}\n\n---\n\n### 📚 상세 부분별 요약\n\n{combined}"
+                                            )
+                                        }])
+                                        
+                                        updated_df = pd.concat([chats_df, new_row], ignore_index=True)
+                                        
+                                        if save_sheet(updated_df, "chats"):
+                                            st.success(f"✅ 분할 요약 완료! ({len(chunks)}개 부분 분석)")
+                                            st.markdown("### 📄 통합 요약 결과")
+                                            st.markdown(final_summary)
+                                            st.rerun()
+                                    
+                                    except Exception as e:
+                                        st.error(f"❌ 분할 요약 실패: {e}")
+                            else:
+                                st.warning("⚠️ 주제를 입력하세요")
+                
+                except Exception as e:
+                    st.error(f"❌ 파일 읽기 실패: {e}")
+
 
     
     # AI 요약 기능
