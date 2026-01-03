@@ -305,23 +305,26 @@ if "GEMINI_API_KEY" in st.secrets:
 # 페이지 설정
 st.set_page_config(page_title="스마트 업무 비서", page_icon="📝", layout="wide")
 
-# CSS 수정
+# CSS로 여백 최소화
 st.markdown("""
 <style>
     .block-container {
-        padding-top: 2rem !important;  /* 👈 1rem → 2rem */
+        padding-top: 2rem !important;
         padding-bottom: 0rem;
         max-width: 100%;
     }
     h1 {
-        margin-top: 0.5rem !important;  /* 👈 0rem → 0.5rem */
+        margin-top: 0.5rem !important;
         margin-bottom: 0.5rem;
     }
+    .stCaption {
+        margin-bottom: 0rem !important;
+    }
     .element-container:has(p) + hr {
-        margin-top: 0rem !important;
+        margin-top: 0.5rem !important;
     }
     hr {
-        margin-top: 0rem;
+        margin-top: 0.5rem !important;
         margin-bottom: 1rem;
     }
     [data-testid="stSidebar"] {
@@ -337,7 +340,6 @@ st.markdown("""
 st.markdown("# 📝 스마트 업무 비서")
 st.caption("AI 기반 업무 기록 및 관리 시스템")
 st.divider()
-
 
 # ========== 할 일 알림 체크 ==========
 pending_tasks = check_pending_tasks()
@@ -395,76 +397,9 @@ if mode == "📝 업무 기록하기":
         help="AI 모드: 내용만 입력하면 AI가 업무, 유형, 알림시간을 자동으로 판단합니다"
     )
     
-    # 이미지 업로드 영역
-    st.divider()
-    st.subheader("🖼️ 이미지 추가 (선택)")
-    
     # 세션 상태 초기화
     if "uploaded_images" not in st.session_state:
         st.session_state.uploaded_images = []
-    
-    col1, col2 = st.columns([3, 1])
-    
-    with col1:
-        # 드래그 앤 드롭 & 파일 선택
-        uploaded_files = st.file_uploader(
-            "📎 드래그 앤 드롭 또는 클릭하여 이미지 선택",
-            type=['png', 'jpg', 'jpeg'],
-            accept_multiple_files=True,
-            key="image_uploader",
-            help="여러 이미지를 한 번에 업로드할 수 있습니다"
-        )
-        
-        # 업로드된 파일을 세션 상태에 추가
-        if uploaded_files:
-            for f in uploaded_files:
-                # 중복 체크
-                if f.name not in [img["name"] for img in st.session_state.uploaded_images]:
-                    st.session_state.uploaded_images.append({
-                        "name": f.name,
-                        "data": f
-                    })
-    
-    with col2:
-        # 클립보드 붙여넣기 버튼
-        if PASTE_BUTTON_AVAILABLE:
-            paste_result = pbutton(
-                label="📋 Ctrl+V 붙여넣기",
-                key="clipboard_paste"
-            )
-            
-            if paste_result.image_data is not None:
-                timestamp = now_kst().strftime("%Y%m%d_%H%M%S")
-                paste_name = f"clipboard_{timestamp}.png"
-                
-                # 중복 체크
-                if paste_name not in [img["name"] for img in st.session_state.uploaded_images]:
-                    st.session_state.uploaded_images.append({
-                        "name": paste_name,
-                        "data": paste_result.image_data,
-                        "is_pasted": True
-                    })
-                    st.rerun()
-    
-    # 업로드된 이미지 미리보기 및 삭제
-    if st.session_state.uploaded_images:
-        st.info(f"📸 {len(st.session_state.uploaded_images)}개의 이미지 준비됨")
-        
-        for idx, img in enumerate(st.session_state.uploaded_images):
-            col_img, col_del = st.columns([5, 1])
-            
-            with col_img:
-                if img.get("is_pasted"):
-                    st.image(img["data"], caption=img["name"], width=150)
-                else:
-                    st.image(img["data"], caption=img["name"], width=150)
-            
-            with col_del:
-                if st.button("🗑️ 삭제", key=f"del_img_{idx}"):
-                    st.session_state.uploaded_images.pop(idx)
-                    st.rerun()
-    
-    st.divider()
     
     # 입력 폼
     with st.form(key="note_form", clear_on_submit=True):
@@ -474,8 +409,9 @@ if mode == "📝 업무 기록하기":
             selected_menu = st.selectbox("📁 업무 선택", menu_list)
             note_type = st.radio("🏷️ 유형", ["💡 아이디어", "✅ 할 일", "📝 업데이트", "🔥 문제점"], horizontal=True)
             content = st.text_area(
-                "📝 내용", 
-                height=150
+                "📝 내용 (여기에 이미지 드래그 앤 드롭 가능)", 
+                height=150,
+                help="💡 Tip: 이미지를 이 입력창에 직접 드래그 앤 드롭하세요!"
             )
             
             # 할 일일 경우 알림시간 입력
@@ -492,13 +428,72 @@ if mode == "📝 업무 기록하기":
         else:
             # AI 모드: 내용만 입력
             content = st.text_area(
-                "📝 내용만 입력하세요 (AI가 자동으로 업무, 유형, 알림시간을 판단합니다)", 
+                "📝 내용만 입력하세요 (이미지 드래그 앤 드롭 가능)", 
                 height=200,
-                help="예: '내일 오후 3시에 xx회사 방문예정' → AI가 자동 판단"
+                help="💡 Tip: AI가 자동 판단 + 이미지를 여기에 직접 드래그 앤 드롭하세요!"
             )
             selected_menu = None
             note_type = None
             alarm_time = None
+        
+        st.markdown("---")
+        
+        # 이미지 업로드 영역
+        st.markdown("**🖼️ 추가 이미지 업로드 (선택)**")
+        
+        col1, col2 = st.columns([3, 1])
+        
+        with col1:
+            # 드래그 앤 드롭 & 파일 선택
+            uploaded_files = st.file_uploader(
+                "📎 여러 이미지 선택 가능",
+                type=['png', 'jpg', 'jpeg'],
+                accept_multiple_files=True,
+                key="image_uploader",
+                label_visibility="collapsed"
+            )
+            
+            # 업로드된 파일을 세션 상태에 추가
+            if uploaded_files:
+                for f in uploaded_files:
+                    # 중복 체크
+                    if f.name not in [img["name"] for img in st.session_state.uploaded_images]:
+                        st.session_state.uploaded_images.append({
+                            "name": f.name,
+                            "data": f
+                        })
+        
+        with col2:
+            # 클립보드 붙여넣기 버튼
+            if PASTE_BUTTON_AVAILABLE:
+                paste_result = pbutton(
+                    label="📋 Ctrl+V",
+                    key="clipboard_paste"
+                )
+                
+                if paste_result.image_data is not None:
+                    timestamp = now_kst().strftime("%Y%m%d_%H%M%S")
+                    paste_name = f"clipboard_{timestamp}.png"
+                    
+                    # 중복 체크
+                    if paste_name not in [img["name"] for img in st.session_state.uploaded_images]:
+                        st.session_state.uploaded_images.append({
+                            "name": paste_name,
+                            "data": paste_result.image_data,
+                            "is_pasted": True
+                        })
+        
+        # 업로드된 이미지 미리보기 (폼 안에서)
+        if st.session_state.uploaded_images:
+            st.info(f"📸 {len(st.session_state.uploaded_images)}개의 이미지 준비됨")
+            
+            cols = st.columns(min(len(st.session_state.uploaded_images), 4))
+            for idx, img in enumerate(st.session_state.uploaded_images):
+                with cols[idx % 4]:
+                    if img.get("is_pasted"):
+                        st.image(img["data"], caption=img["name"], use_column_width=True)
+                    else:
+                        st.image(img["data"], caption=img["name"], use_column_width=True)
         
         submit = st.form_submit_button("💾 저장", type="primary")
         
@@ -578,6 +573,18 @@ if mode == "📝 업무 기록하기":
             else:
                 st.warning("⚠️ 내용을 입력하세요")
     
+    # 폼 밖에서 이미지 삭제 버튼
+    if st.session_state.uploaded_images:
+        st.markdown("**업로드된 이미지 관리**")
+        for idx, img in enumerate(st.session_state.uploaded_images):
+            col1, col2 = st.columns([5, 1])
+            with col1:
+                st.text(f"📷 {img['name']}")
+            with col2:
+                if st.button("🗑️", key=f"del_img_{idx}"):
+                    st.session_state.uploaded_images.pop(idx)
+                    st.rerun()
+    
     st.divider()
     st.subheader(f"📚 최근 기록 (전체는 '📋 전체 히스토리' 메뉴에서)")
     
@@ -601,6 +608,7 @@ if mode == "📝 업무 기록하기":
                     st.image(row['이미지'], use_container_width=True)
     else:
         st.info("📭 아직 기록이 없습니다")
+
 
 # ================== 모드 2: 전체 히스토리 ==================
 elif mode == "📋 전체 히스토리":
