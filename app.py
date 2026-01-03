@@ -10,7 +10,13 @@ from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload
 import io
 from PIL import Image
-from streamlit_paste_button import paste_image_button as pbutton
+
+# streamlit_paste_button 선택적 import
+try:
+    from streamlit_paste_button import paste_image_button as pbutton
+    PASTE_BUTTON_AVAILABLE = True
+except ImportError:
+    PASTE_BUTTON_AVAILABLE = False
 
 # 한국 시간대 설정
 TZ_KST = pytz.timezone("Asia/Seoul")
@@ -115,28 +121,29 @@ if "GEMINI_API_KEY" in st.secrets:
 # 페이지 설정
 st.set_page_config(page_title="스마트 업무 비서", page_icon="📝", layout="wide")
 
-# CSS로 여백 줄이기
+# CSS로 여백 줄이기 + 제목 영역 확보
 st.markdown("""
 <style>
-    /* 상단 여백 제거 */
     .block-container {
         padding-top: 1rem;
         padding-bottom: 0rem;
+        max-width: 100%;
     }
-    /* 헤더 여백 줄이기 */
     h1 {
         margin-top: 0rem;
         margin-bottom: 0.5rem;
     }
-    /* divider 여백 줄이기 */
     hr {
         margin-top: 0.5rem;
         margin-bottom: 1rem;
     }
+    [data-testid="stSidebar"] {
+        width: 250px;
+    }
 </style>
 """, unsafe_allow_html=True)
 
-# 제목 (여백 최소화)
+# 제목
 st.markdown("# 📝 스마트 업무 비서")
 st.caption("AI 기반 업무 기록 및 관리 시스템")
 st.divider()
@@ -159,7 +166,7 @@ if mode == "📝 업무 기록하기":
     
     if config_df.empty or len(config_df) == 0:
         st.error("⚠️ config 시트를 불러올 수 없습니다!")
-        st.info("💡 사이드바의 '🔄 캐시 초기화' 버튼을 눌러주세요")
+        st.info("💡 화면 하단의 '⚙️ 시스템 설정'에서 캐시 초기화를 눌러주세요")
         st.info("💡 또는 '⚙️ 메뉴/설정 관리'에서 업무를 등록하세요")
         st.stop()
     
@@ -173,18 +180,20 @@ if mode == "📝 업무 기록하기":
         st.warning("⚠️ 등록된 업무가 없습니다. 설정 메뉴에서 업무를 먼저 등록하세요.")
         st.stop()
     
-    st.write("**🖼️ 이미지 추가 (선택)**")
-    paste_result = pbutton(
-        label="📋 클립보드에서 이미지 붙여넣기 (Ctrl+V)",
-        key="clipboard_paste"
-    )
-    
-    if paste_result.image_data is not None:
-        st.success("✅ 클립보드 이미지 준비됨!")
-        st.image(paste_result.image_data, width=200)
-        st.session_state["pending_image"] = paste_result.image_data
-    
-    st.divider()
+    # 클립보드 이미지 기능 (라이브러리 있을 때만)
+    if PASTE_BUTTON_AVAILABLE:
+        st.write("**🖼️ 이미지 추가 (선택)**")
+        paste_result = pbutton(
+            label="📋 클립보드에서 이미지 붙여넣기 (Ctrl+V)",
+            key="clipboard_paste"
+        )
+        
+        if paste_result.image_data is not None:
+            st.success("✅ 클립보드 이미지 준비됨!")
+            st.image(paste_result.image_data, width=200)
+            st.session_state["pending_image"] = paste_result.image_data
+        
+        st.divider()
     
     with st.form(key="note_form", clear_on_submit=True):
         selected_menu = st.selectbox("📁 업무 선택", menu_list)
@@ -192,11 +201,11 @@ if mode == "📝 업무 기록하기":
         content = st.text_area(
             "📝 내용", 
             height=150, 
-            help="💡 Tip: 스크린샷 캡처 후 위의 '클립보드 붙여넣기' 버튼으로 이미지를 먼저 추가하세요!"
+            help="💡 Tip: 스크린샷 캡처 후 파일 업로드 또는 클립보드 붙여넣기로 이미지를 추가하세요!"
         )
         
         uploaded_file = st.file_uploader(
-            "📎 또는 파일 업로드",
+            "📎 이미지 업로드",
             type=['png', 'jpg', 'jpeg'],
             key="file_upload"
         )
@@ -207,7 +216,7 @@ if mode == "📝 업무 기록하기":
             if content.strip():
                 image_url = None
                 
-                if "pending_image" in st.session_state:
+                if PASTE_BUTTON_AVAILABLE and "pending_image" in st.session_state:
                     with st.spinner("📤 이미지 업로드 중..."):
                         timestamp = now_kst().strftime("%Y%m%d_%H%M%S")
                         filename = f"clipboard_{timestamp}.png"
