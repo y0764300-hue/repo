@@ -386,10 +386,10 @@ if mode == "📝 업무 기록하기":
         st.warning("⚠️ 등록된 업무가 없습니다. 설정 메뉴에서 업무를 먼저 등록하세요.")
         st.stop()
     
-    # AI 자동 분류 모드 선택
+    # AI 자동 분류 모드 선택 (기본값: AI 자동 분류)
     ai_mode = st.radio(
         "🤖 입력 모드",
-        ["✋ 수동 선택 (내가 직접)", "🤖 AI 자동 분류"],
+        ["🤖 AI 자동 분류", "✋ 수동 선택 (내가 직접)"],
         horizontal=True,
         help="AI 모드: 내용만 입력하면 AI가 업무, 유형, 알림시간을 자동으로 판단합니다"
     )
@@ -529,7 +529,9 @@ if mode == "📝 업무 기록하기":
     
     notes_df = load_sheet("notes")
     if not notes_df.empty:
-        recent_notes = notes_df.head(5)
+        # 최신순으로 정렬 후 상위 5개
+        recent_notes = notes_df.iloc[::-1].head(5)
+        
         for idx, row in recent_notes.iterrows():
             alarm_info = ""
             if str(row.get("알림시간", "")).strip() and str(row.get("알림시간", "")) != "nan":
