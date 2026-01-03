@@ -270,7 +270,7 @@ st.set_page_config(
     page_title="스마트 업무 비서", 
     page_icon="📝", 
     layout="wide",
-    initial_sidebar_state="collapsed"  # 모바일에서는 사이드바 기본 숨김
+    initial_sidebar_state="collapsed"
 )
 
 # ============ 모바일 최적화 CSS ============
@@ -292,7 +292,6 @@ st.markdown("""
             padding-right: 0.5rem !important;
         }
         
-        /* 모바일에서 헤더 크기 조정 */
         h1 {
             font-size: 1.5rem !important;
         }
@@ -305,14 +304,12 @@ st.markdown("""
             font-size: 1.1rem !important;
         }
         
-        /* 모바일 버튼 크기 확대 (터치하기 쉽게) */
         .stButton > button {
             min-height: 44px !important;
             font-size: 1rem !important;
             padding: 0.75rem 1rem !important;
         }
         
-        /* 입력칸 높이 조정 */
         .stTextInput > div > div > input,
         .stSelectbox > div > div > select {
             min-height: 44px !important;
@@ -323,7 +320,6 @@ st.markdown("""
             font-size: 16px !important;
         }
         
-        /* 라디오 버튼 세로 배치 */
         .stRadio [role="radiogroup"] {
             flex-direction: column !important;
         }
@@ -333,24 +329,20 @@ st.markdown("""
             margin-bottom: 0.5rem !important;
         }
         
-        /* Expander 패딩 조정 */
         .streamlit-expanderHeader {
             padding: 0.75rem !important;
             font-size: 0.9rem !important;
         }
         
-        /* 배지 크기 조정 */
         .badge {
             font-size: 0.75rem !important;
             padding: 0.25rem 0.6rem !important;
         }
         
-        /* 컬럼 간격 줄이기 */
         [data-testid="column"] {
             padding: 0.25rem !important;
         }
         
-        /* 사이드바 메뉴 크기 */
         [data-testid="stSidebar"] [role="radiogroup"] label {
             font-size: 0.95rem !important;
             padding: 0.6rem 0.8rem !important;
@@ -572,7 +564,6 @@ st.markdown("""
         border-color: #3b82f6;
     }
     
-    /* 데이터프레임 반응형 */
     @media (max-width: 768px) {
         [data-testid="stDataFrame"] {
             font-size: 0.85rem !important;
@@ -609,7 +600,7 @@ with st.sidebar:
     
     mode = st.radio(
         "선택",
-        ["업무 기록하기", "전체 히스토리", "대화 이력", "일일 리포트", "메뉴/설정 관리"],
+        ["업무 기록하기", "전체 히스토리", "대화 이력", "일일 리포트", "업무 포트폴리오", "메뉴/설정 관리"],
         label_visibility="collapsed"
     )
 
@@ -652,7 +643,7 @@ if mode == "업무 기록하기":
             note_type = st.radio(
                 "🏷️ 유형", 
                 ["아이디어", "할일", "업데이트", "문제점"], 
-                horizontal=False  # 모바일에서는 세로 배치
+                horizontal=False
             )
             content = st.text_area(
                 "📝 내용", 
@@ -1088,7 +1079,258 @@ elif mode == "일일 리포트":
     else:
         st.info("📭 전체 기록 없음")
 
-# ================== 모드 5: 메뉴/설정 관리 ==================
+# ================== 모드 5: 업무 포트폴리오 ==================
+elif mode == "업무 포트폴리오":
+    st.markdown("## 📊 업무 포트폴리오")
+    st.caption("개발한 업무들의 통계와 성과를 한눈에 확인하세요")
+    
+    config_df = load_sheet("config")
+    notes_df = load_sheet("notes")
+    
+    if config_df.empty:
+        st.warning("⚠️ 등록된 업무가 없습니다")
+        st.stop()
+    
+    # ========== 1. 전체 요약 ==========
+    st.markdown("### 📈 전체 요약")
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        total_menus = len(config_df)
+        st.metric("📁 총 업무 수", f"{total_menus}개")
+    
+    with col2:
+        total_records = len(notes_df) if not notes_df.empty else 0
+        st.metric("📝 총 기록 수", f"{total_records}건")
+    
+    with col3:
+        if not notes_df.empty and "날짜" in notes_df.columns:
+            dates = pd.to_datetime(notes_df["날짜"])
+            if len(dates) > 1:
+                days_active = (dates.max() - dates.min()).days + 1
+                st.metric("📅 활동 기간", f"{days_active}일")
+            else:
+                st.metric("📅 활동 기간", "1일")
+        else:
+            st.metric("📅 활동 기간", "0일")
+    
+    st.divider()
+    
+    # ========== 2. 업무별 상세 통계 ==========
+    st.markdown("### 📁 업무별 상세")
+    
+    for idx, row in config_df.iterrows():
+        menu_name = row['메뉴명']
+        menu_desc = row.get('업무설명', '')
+        
+        # 이 업무의 기록 개수
+        if not notes_df.empty and "메뉴" in notes_df.columns:
+            menu_records = notes_df[notes_df["메뉴"] == menu_name]
+            record_count = len(menu_records)
+            
+            # 유형별 개수
+            type_counts = {}
+            if not menu_records.empty and "유형" in menu_records.columns:
+                type_counts = menu_records["유형"].value_counts().to_dict()
+            
+            # 최근 활동일
+            last_activity = ""
+            if not menu_records.empty and "날짜" in menu_records.columns:
+                last_date = menu_records["날짜"].max()
+                last_activity = f"최근: {last_date}"
+        else:
+            record_count = 0
+            type_counts = {}
+            last_activity = "활동 없음"
+        
+        # Expander로 표시
+        with st.expander(f"**{menu_name}** ({record_count}건) {last_activity}"):
+            
+            # 업무 설명
+            if menu_desc:
+                st.info(f"📝 **설명:** {menu_desc}")
+            else:
+                st.caption("설명이 없습니다")
+            
+            # 유형별 통계
+            if type_counts:
+                st.markdown("**📊 유형별 통계**")
+                
+                col1, col2, col3, col4 = st.columns(4)
+                
+                with col1:
+                    idea_count = type_counts.get("아이디어", 0)
+                    st.metric("💡 아이디어", idea_count)
+                
+                with col2:
+                    todo_count = type_counts.get("할일", 0)
+                    st.metric("✅ 할일", todo_count)
+                
+                with col3:
+                    update_count = type_counts.get("업데이트", 0)
+                    st.metric("📝 업데이트", update_count)
+                
+                with col4:
+                    issue_count = type_counts.get("문제점", 0)
+                    st.metric("🔥 문제점", issue_count)
+            
+            # 최근 5개 기록 미리보기
+            if not menu_records.empty:
+                st.markdown("**📋 최근 기록 미리보기**")
+                recent_5 = menu_records.iloc[::-1].head(5)
+                
+                for r_idx, r_row in recent_5.iterrows():
+                    badge_class = {
+                        "아이디어": "badge-idea",
+                        "할일": "badge-todo",
+                        "업데이트": "badge-update",
+                        "문제점": "badge-issue"
+                    }.get(r_row['유형'], "badge-update")
+                    
+                    content_preview = r_row['내용'][:50] + "..." if len(r_row['내용']) > 50 else r_row['내용']
+                    
+                    st.markdown(
+                        f"<span class='badge {badge_class}'>{r_row['유형']}</span> "
+                        f"{r_row['날짜']} - {content_preview}", 
+                        unsafe_allow_html=True
+                    )
+            else:
+                st.caption("📭 아직 기록이 없습니다")
+            
+            # 이 업무만 보기 버튼
+            if st.button(f"🔍 '{menu_name}' 전체 보기", key=f"view_{idx}", use_container_width=True):
+                st.info(f"💡 **팁:** '전체 히스토리' 메뉴에서 업무를 '{menu_name}'로 필터링하면 볼 수 있어요!")
+    
+    st.divider()
+    
+    # ========== 3. 시간별 활동 분석 ==========
+    if not notes_df.empty and "날짜" in notes_df.columns:
+        st.markdown("### 📅 시간별 활동 분석")
+        
+        # 날짜별 기록 수
+        date_counts = notes_df["날짜"].value_counts().sort_index()
+        
+        # 최근 7일 활동
+        recent_7days = date_counts.tail(7)
+        
+        st.markdown("**📊 최근 7일 활동량**")
+        
+        if len(recent_7days) > 0:
+            for date, count in recent_7days.items():
+                # 간단한 막대 그래프 표현
+                bar = "█" * min(int(count), 20)
+                st.markdown(f"`{date}` {bar} **{count}건**")
+        else:
+            st.caption("최근 7일 활동이 없습니다")
+        
+        # 가장 활발한 날
+        most_active_date = date_counts.idxmax()
+        most_active_count = date_counts.max()
+        
+        st.success(f"🏆 **가장 활발했던 날:** {most_active_date} ({most_active_count}건)")
+    
+    st.divider()
+    
+    # ========== 4. AI 포트폴리오 생성 ==========
+    if "GEMINI_API_KEY" in st.secrets:
+        st.markdown("### 🤖 AI 포트폴리오 자동 생성")
+        st.caption("AI가 당신의 업무 활동을 분석해서 포트폴리오 문서를 만들어줍니다")
+        
+        if st.button("📝 AI 포트폴리오 생성", type="primary", use_container_width=True):
+            
+            with st.spinner("🤖 포트폴리오 생성 중..."):
+                try:
+                    # 모든 업무 정보 수집
+                    portfolio_data = ""
+                    
+                    for idx, row in config_df.iterrows():
+                        menu_name = row['메뉴명']
+                        menu_desc = row.get('업무설명', '설명 없음')
+                        
+                        if not notes_df.empty and "메뉴" in notes_df.columns:
+                            menu_records = notes_df[notes_df["메뉴"] == menu_name]
+                            record_count = len(menu_records)
+                            
+                            # 최근 기록 3개
+                            recent_records = menu_records.iloc[::-1].head(3)
+                            records_text = "\n".join([f"- [{r['유형']}] {r['내용'][:100]}" for _, r in recent_records.iterrows()])
+                        else:
+                            record_count = 0
+                            records_text = "기록 없음"
+                        
+                        portfolio_data += f"""
+## {menu_name}
+- 설명: {menu_desc}
+- 총 기록: {record_count}건
+- 최근 활동:
+{records_text}
+
+"""
+                    
+                    model = genai.GenerativeModel('gemini-2.5-flash')
+                    
+                    prompt = f"""다음은 한 사용자가 개발하고 관리한 업무들의 기록입니다.
+이를 바탕으로 전문적인 업무 포트폴리오를 작성해주세요.
+
+## 요구사항
+1. 전체 업무 개요 (무슨 일을 해왔는지)
+2. 각 업무별 주요 성과와 역할
+3. 전체적인 업무 능력 요약
+4. 특히 잘한 점
+
+## 업무 데이터
+{portfolio_data[:5000]}
+
+---
+위 내용을 바탕으로 전문적이고 읽기 쉬운 포트폴리오를 작성해주세요.
+마크다운 형식으로 작성하되, 한국어로 작성해주세요."""
+
+                    response = model.generate_content(prompt)
+                    portfolio_text = response.text
+                    
+                    st.success("✅ 포트폴리오 생성 완료!")
+                    
+                    st.divider()
+                    st.markdown("### 📄 생성된 포트폴리오")
+                    st.markdown(portfolio_text)
+                    
+                    st.divider()
+                    
+                    # 저장 옵션
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        if st.button("💾 대화 이력에 저장", use_container_width=True):
+                            chats_df = load_sheet("chats")
+                            new_row = pd.DataFrame([{
+                                "날짜": today_kst_str(),
+                                "시간": now_kst().strftime("%H:%M:%S"),
+                                "주제": "업무 포트폴리오",
+                                "전체내용": portfolio_text
+                            }])
+                            
+                            updated_df = pd.concat([chats_df, new_row], ignore_index=True)
+                            
+                            if save_sheet(updated_df, "chats"):
+                                st.success("✅ 저장 완료!")
+                    
+                    with col2:
+                        # 다운로드 버튼
+                        st.download_button(
+                            label="📥 텍스트 파일로 다운로드",
+                            data=portfolio_text,
+                            file_name=f"업무포트폴리오_{today_kst_str()}.md",
+                            mime="text/markdown",
+                            use_container_width=True
+                        )
+                
+                except Exception as e:
+                    st.error(f"❌ 포트폴리오 생성 실패: {e}")
+    else:
+        st.info("💡 API 키를 설정하면 AI 포트폴리오 생성 기능을 사용할 수 있어요")
+
+# ================== 모드 6: 메뉴/설정 관리 ==================
 elif mode == "메뉴/설정 관리":
     st.markdown("## ⚙️ 설정")
     
