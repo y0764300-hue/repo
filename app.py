@@ -39,13 +39,20 @@ def load_sheet(worksheet):
         
         if df is None or len(df) == 0:
             if worksheet == "notes":
-                return pd.DataFrame(columns=['날짜', '시간', '메뉴', '유형', '내용', '이미지'])
+                return pd.DataFrame(columns=['날짜', '시간', '메뉴', '유형', '내용', '이미지', '알림시간', '완료'])
             elif worksheet == "chats":
                 return pd.DataFrame(columns=['날짜', '시간', '주제', '전체내용'])
             elif worksheet == "config":
                 return pd.DataFrame(columns=["메뉴명", "시트정보", "트리거정보", "업무설명", "메일발송설정"])
         
         df = df.fillna("")
+        
+        # 기존 데이터에 새 컬럼 추가 (없으면)
+        if worksheet == "notes":
+            if "알림시간" not in df.columns:
+                df["알림시간"] = ""
+            if "완료" not in df.columns:
+                df["완료"] = ""
         
         for col in df.columns:
             if df[col].dtype == 'object':
@@ -56,7 +63,7 @@ def load_sheet(worksheet):
     except Exception as e:
         st.error(f"❌ 시트 로드 실패 ({worksheet}): {e}")
         if worksheet == "notes":
-            return pd.DataFrame(columns=['날짜', '시간', '메뉴', '유형', '내용', '이미지'])
+            return pd.DataFrame(columns=['날짜', '시간', '메뉴', '유형', '내용', '이미지', '알림시간', '완료'])
         elif worksheet == "chats":
             return pd.DataFrame(columns=['날짜', '시간', '주제', '전체내용'])
         elif worksheet == "config":
@@ -114,6 +121,133 @@ def upload_to_drive(image_file, filename):
         st.error(f"❌ 이미지 업로드 실패: {e}")
         return None
 
+def ai_classify_note(content, menu_list, config_df):
+    """AI로 업무와 유형 자동 분류"""
+    try:
+        if "GEMINI_API_KEY" not in st.secrets:
+            return None, None, None
+        
+        model = genai.GenerativeModel('gemini-2.5-flash')
+        
+        # 업무 설명 정보 추가
+        menu_info = ""
+        for idx, row in config_df.iterrows():
+            if "업무설명" in config_df.columns and str(row["업무설명"]).strip():
+                menu_info += f"- {row['메뉴명']}: {row['업무설명']}\n"
+            else:
+                menu_info += f"- {row['메뉴명']}\n"
+        
+        prompt = f"""다음 업무 메모를 분석해서 어떤 업무에 해당하는지, 그리고 어떤 유형인지 판단해줘.
+
+[등록된 업무 목록]
+{menu_info}
+
+[유형 설명]
+- 💡 아이디어: 새로운 제안, 개선 방안, 창의적인 생각
+- ✅ 할 일: 앞으로 해야 할 작업, 처리 필요한 업무
+- 📝 업데이트: 진행 상황, 완료 보고, 현황 공유
+- 🔥 문제점: 발생한 이슈, 해결 필요한 문제, 에러
+
+[메모 내용]
+{content}
+
+다음 형식으로만 답변해줘 (다른 말은 하지 마):
+업무: [업무명]
+유형: [💡 아이디어 또는 ✅ 할 일 또는 📝 업데이트 또는 🔥 문제점]
+알림시간: [YYYY-MM-DD HH:MM 형식으로, 할 일이고 시간이 언급되면 추출, 없으면 "없음"]"""
+
+        response = model.generate_content(prompt)
+        result = response.text.strip()
+        
+        # 결과 파싱
+        menu = None
+        note_type = None
+        alarm_time = None
+        
+        for line in result.split('\n'):
+            if '업무:' in line:
+                extracted = line.split('업무:')[1].strip()
+                for m in menu_list:
+                    if m in extracted:
+                        menu = m
+                        break
+            elif '유형:' in line:
+                extracted = line.split('유형:')[1].strip()
+                if '아이디어' in extracted or '💡' in extracted:
+                    note_type = '💡 아이디어'
+                elif '할' in extracted and '일' in extracted or '✅' in extracted:
+                    note_type = '✅ 할 일'
+                elif '업데이트' in extracted or '📝' in extracted:
+                    note_type = '📝 업데이트'
+                elif '문제' in extracted or '🔥' in extracted:
+                    note_type = '🔥 문제점'
+            elif '알림시간:' in line:
+                extracted = line.split('알림시간:')[1].strip()
+                if extracted != "없음" and len(extracted) > 5:
+                    alarm_time = extracted
+        
+        return menu, note_type, alarm_time
+        
+    except Exception as e:
+        st.warning(f"⚠️ AI 분류 실패: {e}")
+        return None, None, None
+
+def check_pending_tasks():
+    """할 일 알림 체크"""
+    notes_df = load_sheet("notes")
+    
+    if notes_df.empty:
+        return []
+    
+    # 할 일만 필터링
+    todos = notes_df[notes_df["유형"] == "✅ 할 일"].copy()
+    
+    if todos.empty:
+        return []
+    
+    # 미완료 + 알림시간 있는 것만
+    pending = []
+    now = now_kst()
+    
+    for idx, row in todos.iterrows():
+        # 완료 체크
+        if str(row.get("완료", "")).strip().lower() in ["o", "완료", "done", "x"]:
+            continue
+        
+        # 알림시간 체크
+        alarm = str(row.get("알림시간", "")).strip()
+        if not alarm or alarm == "nan":
+            continue
+        
+        try:
+            # 알림시간 파싱
+            alarm_dt = datetime.strptime(alarm, "%Y-%m-%d %H:%M")
+            alarm_dt = TZ_KST.localize(alarm_dt)
+            
+            # 30분 전부터 알림
+            if alarm_dt - timedelta(minutes=30) <= now <= alarm_dt + timedelta(hours=2):
+                time_diff = alarm_dt - now
+                minutes = int(time_diff.total_seconds() / 60)
+                
+                if minutes < 0:
+                    status = f"⏰ {abs(minutes)}분 지남"
+                elif minutes == 0:
+                    status = "⏰ 지금!"
+                else:
+                    status = f"⏰ {minutes}분 후"
+                
+                pending.append({
+                    "메뉴": row["메뉴"],
+                    "내용": row["내용"],
+                    "알림시간": alarm,
+                    "상태": status,
+                    "idx": idx
+                })
+        except:
+            pass
+    
+    return pending
+
 # Gemini API 설정
 if "GEMINI_API_KEY" in st.secrets:
     genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
@@ -133,7 +267,6 @@ st.markdown("""
         margin-top: 0rem;
         margin-bottom: 0.5rem;
     }
-    /* caption과 hr 사이 여백 완전 제거 */
     .element-container:has(p) + hr {
         margin-top: 0rem !important;
     }
@@ -144,7 +277,6 @@ st.markdown("""
     [data-testid="stSidebar"] {
         width: 250px;
     }
-    /* caption 아래 여백 제거 */
     .element-container p {
         margin-bottom: 0rem;
     }
@@ -155,6 +287,22 @@ st.markdown("""
 st.markdown("# 📝 스마트 업무 비서")
 st.caption("AI 기반 업무 기록 및 관리 시스템")
 st.divider()
+
+# ========== 할 일 알림 체크 ==========
+pending_tasks = check_pending_tasks()
+if pending_tasks:
+    st.warning(f"⏰ **{len(pending_tasks)}개의 할 일 알림**")
+    for task in pending_tasks:
+        with st.expander(f"{task['상태']} - [{task['메뉴']}] {task['내용'][:30]}..."):
+            st.markdown(f"**예정 시간:** {task['알림시간']}")
+            st.markdown(f"**내용:** {task['내용']}")
+            
+            if st.button("✅ 완료 처리", key=f"done_{task['idx']}"):
+                notes_df = load_sheet("notes")
+                notes_df.loc[task['idx'], '완료'] = 'O'
+                if save_sheet(notes_df, "notes"):
+                    st.success("✅ 완료!")
+                    st.rerun()
 
 # ========== 사이드바: 모드 선택만 ==========
 with st.sidebar:
@@ -188,6 +336,14 @@ if mode == "📝 업무 기록하기":
         st.warning("⚠️ 등록된 업무가 없습니다. 설정 메뉴에서 업무를 먼저 등록하세요.")
         st.stop()
     
+    # AI 자동 분류 모드 선택
+    ai_mode = st.radio(
+        "🤖 입력 모드",
+        ["✋ 수동 선택 (내가 직접)", "🤖 AI 자동 분류"],
+        horizontal=True,
+        help="AI 모드: 내용만 입력하면 AI가 업무, 유형, 알림시간을 자동으로 판단합니다"
+    )
+    
     # 클립보드 이미지 기능 (라이브러리 있을 때만)
     if PASTE_BUTTON_AVAILABLE:
         st.write("**🖼️ 이미지 추가 (선택)**")
@@ -204,13 +360,38 @@ if mode == "📝 업무 기록하기":
         st.divider()
     
     with st.form(key="note_form", clear_on_submit=True):
-        selected_menu = st.selectbox("📁 업무 선택", menu_list)
-        note_type = st.radio("🏷️ 유형", ["💡 아이디어", "✅ 업데이트", "🔥 문제점"], horizontal=True)
-        content = st.text_area(
-            "📝 내용", 
-            height=150, 
-            help="💡 Tip: 스크린샷 캡처 후 파일 업로드 또는 클립보드 붙여넣기로 이미지를 추가하세요!"
-        )
+        
+        if ai_mode == "✋ 수동 선택 (내가 직접)":
+            # 기존 방식: 수동 선택
+            selected_menu = st.selectbox("📁 업무 선택", menu_list)
+            note_type = st.radio("🏷️ 유형", ["💡 아이디어", "✅ 할 일", "📝 업데이트", "🔥 문제점"], horizontal=True)
+            content = st.text_area(
+                "📝 내용", 
+                height=150, 
+                help="💡 Tip: 스크린샷 캡처 후 파일 업로드 또는 클립보드 붙여넣기로 이미지를 추가하세요!"
+            )
+            
+            # 할 일일 경우 알림시간 입력
+            alarm_time = None
+            if note_type == "✅ 할 일":
+                col1, col2 = st.columns(2)
+                with col1:
+                    alarm_date = st.date_input("📅 알림 날짜 (선택)", value=None)
+                with col2:
+                    alarm_time_input = st.time_input("⏰ 알림 시간 (선택)", value=None)
+                
+                if alarm_date and alarm_time_input:
+                    alarm_time = f"{alarm_date.strftime('%Y-%m-%d')} {alarm_time_input.strftime('%H:%M')}"
+        else:
+            # AI 모드: 내용만 입력
+            content = st.text_area(
+                "📝 내용만 입력하세요 (AI가 자동으로 업무, 유형, 알림시간을 판단합니다)", 
+                height=200, 
+                help="예: '내일 오후 3시에 xx회사 방문예정' → AI가 자동 판단"
+            )
+            selected_menu = None
+            note_type = None
+            alarm_time = None
         
         uploaded_file = st.file_uploader(
             "📎 이미지 업로드",
@@ -222,6 +403,26 @@ if mode == "📝 업무 기록하기":
         
         if submit:
             if content.strip():
+                
+                # AI 모드일 때 자동 분류
+                if ai_mode == "🤖 AI 자동 분류":
+                    if "GEMINI_API_KEY" not in st.secrets:
+                        st.error("❌ AI 모드를 사용하려면 API 키가 필요합니다. 수동 모드를 사용하세요.")
+                        st.stop()
+                    
+                    with st.spinner("🤖 AI가 분석 중..."):
+                        selected_menu, note_type, alarm_time = ai_classify_note(content, menu_list, config_df)
+                    
+                    if selected_menu and note_type:
+                        msg = f"🤖 AI 분류 완료: **{selected_menu}** / **{note_type}**"
+                        if alarm_time:
+                            msg += f" / 알림: **{alarm_time}**"
+                        st.success(msg)
+                    else:
+                        st.error("❌ AI 분류 실패. 수동 모드를 사용하거나 다시 시도하세요.")
+                        st.stop()
+                
+                # 이미지 처리
                 image_url = None
                 
                 if PASTE_BUTTON_AVAILABLE and "pending_image" in st.session_state:
@@ -250,6 +451,7 @@ if mode == "📝 업무 기록하기":
                         filename = f"{timestamp}_{uploaded_file.name}"
                         image_url = upload_to_drive(uploaded_file, filename)
                 
+                # 저장
                 notes_df = load_sheet("notes")
                 new_row = pd.DataFrame([{
                     "날짜": today_kst_str(),
@@ -257,7 +459,9 @@ if mode == "📝 업무 기록하기":
                     "메뉴": selected_menu,
                     "유형": note_type,
                     "내용": content,
-                    "이미지": image_url if image_url else ""
+                    "이미지": image_url if image_url else "",
+                    "알림시간": alarm_time if alarm_time else "",
+                    "완료": ""
                 }])
                 
                 updated_df = pd.concat([notes_df, new_row], ignore_index=True)
@@ -277,7 +481,15 @@ if mode == "📝 업무 기록하기":
     if not notes_df.empty:
         recent_notes = notes_df.head(5)
         for idx, row in recent_notes.iterrows():
-            with st.expander(f"{row['유형']} [{row['메뉴']}] {row['날짜']} {row['시간']}"):
+            alarm_info = ""
+            if str(row.get("알림시간", "")).strip() and str(row.get("알림시간", "")) != "nan":
+                alarm_info = f" ⏰ {row['알림시간']}"
+            
+            done_mark = ""
+            if str(row.get("완료", "")).strip().lower() in ["o", "완료", "done", "x"]:
+                done_mark = " ✅"
+            
+            with st.expander(f"{row['유형']} [{row['메뉴']}] {row['날짜']} {row['시간']}{alarm_info}{done_mark}"):
                 st.markdown(row['내용'])
                 if row['이미지'] and str(row['이미지']) != 'nan' and str(row['이미지']).strip():
                     st.image(row['이미지'], use_container_width=True)
@@ -303,7 +515,7 @@ elif mode == "📋 전체 히스토리":
         with col2:
             filter_type = st.selectbox(
                 "🏷️ 유형 필터",
-                ["전체", "💡 아이디어", "✅ 업데이트", "🔥 문제점"]
+                ["전체", "💡 아이디어", "✅ 할 일", "📝 업데이트", "🔥 문제점"]
             )
         with col3:
             filter_date = st.selectbox(
@@ -359,10 +571,27 @@ elif mode == "📋 전체 히스토리":
                                     st.session_state[f"edit_{idx}"] = False
                                     st.rerun()
                     else:
-                        with st.expander(f"{row['유형']} [{row['메뉴']}] {row['날짜']} {row['시간']}"):
+                        alarm_info = ""
+                        if str(row.get("알림시간", "")).strip() and str(row.get("알림시간", "")) != "nan":
+                            alarm_info = f" ⏰ {row['알림시간']}"
+                        
+                        done_mark = ""
+                        is_done = str(row.get("완료", "")).strip().lower() in ["o", "완료", "done", "x"]
+                        if is_done:
+                            done_mark = " ✅"
+                        
+                        with st.expander(f"{row['유형']} [{row['메뉴']}] {row['날짜']} {row['시간']}{alarm_info}{done_mark}"):
                             st.markdown(row['내용'])
                             if row['이미지'] and str(row['이미지']) != 'nan' and str(row['이미지']).strip():
                                 st.image(row['이미지'], use_container_width=True)
+                            
+                            # 할 일인 경우 완료 버튼
+                            if row['유형'] == "✅ 할 일" and not is_done:
+                                if st.button("✅ 완료 처리", key=f"complete_{idx}"):
+                                    notes_df.loc[idx, '완료'] = 'O'
+                                    if save_sheet(notes_df, "notes"):
+                                        st.success("✅ 완료!")
+                                        st.rerun()
                 
                 with col2:
                     if f"edit_{idx}" not in st.session_state or not st.session_state[f"edit_{idx}"]:
