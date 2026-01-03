@@ -305,16 +305,16 @@ if "GEMINI_API_KEY" in st.secrets:
 # 페이지 설정
 st.set_page_config(page_title="스마트 업무 비서", page_icon="📝", layout="wide")
 
-# CSS로 여백 최소화
+# CSS 수정
 st.markdown("""
 <style>
     .block-container {
-        padding-top: 1rem;
+        padding-top: 2rem !important;  /* 👈 1rem → 2rem */
         padding-bottom: 0rem;
         max-width: 100%;
     }
     h1 {
-        margin-top: 0rem;
+        margin-top: 0.5rem !important;  /* 👈 0rem → 0.5rem */
         margin-bottom: 0.5rem;
     }
     .element-container:has(p) + hr {
@@ -337,6 +337,7 @@ st.markdown("""
 st.markdown("# 📝 스마트 업무 비서")
 st.caption("AI 기반 업무 기록 및 관리 시스템")
 st.divider()
+
 
 # ========== 할 일 알림 체크 ==========
 pending_tasks = check_pending_tasks()
