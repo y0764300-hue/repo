@@ -114,7 +114,11 @@ if "GEMINI_API_KEY" in st.secrets:
 
 # 페이지 설정
 st.set_page_config(page_title="스마트 업무 비서", page_icon="📝", layout="wide")
-st.title("📝 스마트 업무 비서")
+
+# 제목
+st.markdown("# 📝 스마트 업무 비서")
+st.caption("AI 기반 업무 기록 및 관리 시스템")
+st.divider()
 
 # ========== 사이드바: 모드 선택만 ==========
 with st.sidebar:
@@ -147,8 +151,6 @@ if mode == "📝 업무 기록하기":
     if len(menu_list) == 0:
         st.warning("⚠️ 등록된 업무가 없습니다. 설정 메뉴에서 업무를 먼저 등록하세요.")
         st.stop()
-    
-    st.success(f"✅ {len(menu_list)}개 업무 로드 완료")
     
     st.write("**🖼️ 이미지 추가 (선택)**")
     paste_result = pbutton(
