@@ -394,21 +394,78 @@ if mode == "📝 업무 기록하기":
         help="AI 모드: 내용만 입력하면 AI가 업무, 유형, 알림시간을 자동으로 판단합니다"
     )
     
-    # 클립보드 이미지 기능 (라이브러리 있을 때만)
-    if PASTE_BUTTON_AVAILABLE:
-        st.write("**🖼️ 이미지 추가 (선택)**")
-        paste_result = pbutton(
-            label="📋 클립보드에서 이미지 붙여넣기 (Ctrl+V)",
-            key="clipboard_paste"
+    # 이미지 업로드 영역
+    st.divider()
+    st.subheader("🖼️ 이미지 추가 (선택)")
+    
+    # 세션 상태 초기화
+    if "uploaded_images" not in st.session_state:
+        st.session_state.uploaded_images = []
+    
+    col1, col2 = st.columns([3, 1])
+    
+    with col1:
+        # 드래그 앤 드롭 & 파일 선택
+        uploaded_files = st.file_uploader(
+            "📎 드래그 앤 드롭 또는 클릭하여 이미지 선택",
+            type=['png', 'jpg', 'jpeg'],
+            accept_multiple_files=True,
+            key="image_uploader",
+            help="여러 이미지를 한 번에 업로드할 수 있습니다"
         )
         
-        if paste_result.image_data is not None:
-            st.success("✅ 클립보드 이미지 준비됨!")
-            st.image(paste_result.image_data, width=200)
-            st.session_state["pending_image"] = paste_result.image_data
-        
-        st.divider()
+        # 업로드된 파일을 세션 상태에 추가
+        if uploaded_files:
+            for f in uploaded_files:
+                # 중복 체크
+                if f.name not in [img["name"] for img in st.session_state.uploaded_images]:
+                    st.session_state.uploaded_images.append({
+                        "name": f.name,
+                        "data": f
+                    })
     
+    with col2:
+        # 클립보드 붙여넣기 버튼
+        if PASTE_BUTTON_AVAILABLE:
+            paste_result = pbutton(
+                label="📋 Ctrl+V 붙여넣기",
+                key="clipboard_paste"
+            )
+            
+            if paste_result.image_data is not None:
+                timestamp = now_kst().strftime("%Y%m%d_%H%M%S")
+                paste_name = f"clipboard_{timestamp}.png"
+                
+                # 중복 체크
+                if paste_name not in [img["name"] for img in st.session_state.uploaded_images]:
+                    st.session_state.uploaded_images.append({
+                        "name": paste_name,
+                        "data": paste_result.image_data,
+                        "is_pasted": True
+                    })
+                    st.rerun()
+    
+    # 업로드된 이미지 미리보기 및 삭제
+    if st.session_state.uploaded_images:
+        st.info(f"📸 {len(st.session_state.uploaded_images)}개의 이미지 준비됨")
+        
+        for idx, img in enumerate(st.session_state.uploaded_images):
+            col_img, col_del = st.columns([5, 1])
+            
+            with col_img:
+                if img.get("is_pasted"):
+                    st.image(img["data"], caption=img["name"], width=150)
+                else:
+                    st.image(img["data"], caption=img["name"], width=150)
+            
+            with col_del:
+                if st.button("🗑️ 삭제", key=f"del_img_{idx}"):
+                    st.session_state.uploaded_images.pop(idx)
+                    st.rerun()
+    
+    st.divider()
+    
+    # 입력 폼
     with st.form(key="note_form", clear_on_submit=True):
         
         if ai_mode == "✋ 수동 선택 (내가 직접)":
@@ -417,8 +474,7 @@ if mode == "📝 업무 기록하기":
             note_type = st.radio("🏷️ 유형", ["💡 아이디어", "✅ 할 일", "📝 업데이트", "🔥 문제점"], horizontal=True)
             content = st.text_area(
                 "📝 내용", 
-                height=150, 
-                help="💡 Tip: 스크린샷 캡처 후 파일 업로드 또는 클립보드 붙여넣기로 이미지를 추가하세요!"
+                height=150
             )
             
             # 할 일일 경우 알림시간 입력
@@ -436,18 +492,12 @@ if mode == "📝 업무 기록하기":
             # AI 모드: 내용만 입력
             content = st.text_area(
                 "📝 내용만 입력하세요 (AI가 자동으로 업무, 유형, 알림시간을 판단합니다)", 
-                height=200, 
+                height=200,
                 help="예: '내일 오후 3시에 xx회사 방문예정' → AI가 자동 판단"
             )
             selected_menu = None
             note_type = None
             alarm_time = None
-        
-        uploaded_file = st.file_uploader(
-            "📎 이미지 업로드",
-            type=['png', 'jpg', 'jpeg'],
-            key="file_upload"
-        )
         
         submit = st.form_submit_button("💾 저장", type="primary")
         
@@ -475,31 +525,32 @@ if mode == "📝 업무 기록하기":
                 # 이미지 처리
                 image_url = None
                 
-                if PASTE_BUTTON_AVAILABLE and "pending_image" in st.session_state:
+                if st.session_state.uploaded_images:
                     with st.spinner("📤 이미지 업로드 중..."):
+                        # 첫 번째 이미지만 사용 (여러 개면 첫 번째)
+                        first_img = st.session_state.uploaded_images[0]
+                        
                         timestamp = now_kst().strftime("%Y%m%d_%H%M%S")
-                        filename = f"clipboard_{timestamp}.png"
+                        filename = f"{timestamp}_{first_img['name']}"
                         
-                        img_byte_arr = io.BytesIO()
-                        st.session_state["pending_image"].save(img_byte_arr, format='PNG')
-                        img_byte_arr.seek(0)
-                        
-                        class FakeFile:
-                            def __init__(self, data):
-                                self.data = data
-                                self.type = "image/png"
-                            def getvalue(self):
-                                return self.data
-                        
-                        fake_file = FakeFile(img_byte_arr.getvalue())
-                        image_url = upload_to_drive(fake_file, filename)
-                        del st.session_state["pending_image"]
-                
-                elif uploaded_file is not None:
-                    with st.spinner("📤 이미지 업로드 중..."):
-                        timestamp = now_kst().strftime("%Y%m%d_%H%M%S")
-                        filename = f"{timestamp}_{uploaded_file.name}"
-                        image_url = upload_to_drive(uploaded_file, filename)
+                        if first_img.get("is_pasted"):
+                            # 클립보드 이미지
+                            img_byte_arr = io.BytesIO()
+                            first_img["data"].save(img_byte_arr, format='PNG')
+                            img_byte_arr.seek(0)
+                            
+                            class FakeFile:
+                                def __init__(self, data):
+                                    self.data = data
+                                    self.type = "image/png"
+                                def getvalue(self):
+                                    return self.data
+                            
+                            fake_file = FakeFile(img_byte_arr.getvalue())
+                            image_url = upload_to_drive(fake_file, filename)
+                        else:
+                            # 파일 업로드
+                            image_url = upload_to_drive(first_img["data"], filename)
                 
                 # 저장
                 notes_df = load_sheet("notes")
@@ -518,6 +569,8 @@ if mode == "📝 업무 기록하기":
                 
                 if save_sheet(updated_df, "notes"):
                     st.success("✅ 저장 완료!")
+                    # 이미지 목록 초기화
+                    st.session_state.uploaded_images = []
                     st.rerun()
                 else:
                     st.error("❌ 저장 실패")
