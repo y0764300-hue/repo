@@ -3,6 +3,7 @@ import pandas as pd
 from datetime import datetime, timedelta
 import pytz
 import os
+import re
 import google.generativeai as genai
 from streamlit_gsheets import GSheetsConnection
 from google.oauth2 import service_account
@@ -122,7 +123,7 @@ def upload_to_drive(image_file, filename):
         return None
 
 def ai_classify_note(content, menu_list, config_df):
-    """AI로 업무와 유형 자동 분류"""
+    """AI로 업무와 유형 자동 분류 - 개선 버전"""
     try:
         if "GEMINI_API_KEY" not in st.secrets:
             return None, None, None
@@ -133,63 +134,112 @@ def ai_classify_note(content, menu_list, config_df):
         menu_info = ""
         for idx, row in config_df.iterrows():
             if "업무설명" in config_df.columns and str(row["업무설명"]).strip():
-                menu_info += f"- {row['메뉴명']}: {row['업무설명']}\n"
+                menu_info += f"{idx+1}. {row['메뉴명']}: {row['업무설명']}\n"
             else:
-                menu_info += f"- {row['메뉴명']}\n"
+                menu_info += f"{idx+1}. {row['메뉴명']}\n"
         
-        prompt = f"""다음 업무 메모를 분석해서 어떤 업무에 해당하는지, 그리고 어떤 유형인지 판단해줘.
+        prompt = f"""다음 메모를 분석해서 업무와 유형을 판단해줘.
 
-[등록된 업무 목록]
+등록된 업무:
 {menu_info}
 
-[유형 설명]
-- 💡 아이디어: 새로운 제안, 개선 방안, 창의적인 생각
-- ✅ 할 일: 앞으로 해야 할 작업, 처리 필요한 업무
-- 📝 업데이트: 진행 상황, 완료 보고, 현황 공유
-- 🔥 문제점: 발생한 이슈, 해결 필요한 문제, 에러
+유형 설명:
+- 아이디어: 새로운 제안, 개선안, 창의적 생각
+- 할일: 앞으로 해야 할 작업, 처리 필요한 업무
+- 업데이트: 진행 상황, 완료 보고, 현황
+- 문제점: 발생한 이슈, 해결 필요한 문제
 
-[메모 내용]
+메모 내용:
 {content}
 
-다음 형식으로만 답변해줘 (다른 말은 하지 마):
-업무: [업무명]
-유형: [💡 아이디어 또는 ✅ 할 일 또는 📝 업데이트 또는 🔥 문제점]
-알림시간: [YYYY-MM-DD HH:MM 형식으로, 할 일이고 시간이 언급되면 추출, 없으면 "없음"]"""
+아래 형식으로 정확히 답변해줘:
+업무번호: [1~{len(menu_list)} 중 하나]
+유형: [아이디어/할일/업데이트/문제점 중 하나]
+시간: [할일이고 시간 언급되면 YYYY-MM-DD HH:MM, 없으면 없음]"""
 
         response = model.generate_content(prompt)
         result = response.text.strip()
+        
+        # 디버그 출력
+        with st.expander("🤖 AI 분석 과정 보기"):
+            st.text(result)
         
         # 결과 파싱
         menu = None
         note_type = None
         alarm_time = None
         
-        for line in result.split('\n'):
-            if '업무:' in line:
-                extracted = line.split('업무:')[1].strip()
-                for m in menu_list:
-                    if m in extracted:
-                        menu = m
-                        break
-            elif '유형:' in line:
-                extracted = line.split('유형:')[1].strip()
-                if '아이디어' in extracted or '💡' in extracted:
+        lines = result.split('\n')
+        for line in lines:
+            line = line.strip()
+            
+            # 업무 파싱
+            if '업무' in line and ':' in line:
+                try:
+                    num_str = line.split(':')[1].strip()
+                    # 숫자만 추출
+                    numbers = re.findall(r'\d+', num_str)
+                    if numbers:
+                        menu_idx = int(numbers[0]) - 1
+                        if 0 <= menu_idx < len(menu_list):
+                            menu = menu_list[menu_idx]
+                except:
+                    pass
+            
+            # 유형 파싱
+            elif '유형' in line and ':' in line:
+                type_str = line.split(':')[1].strip().lower()
+                
+                if '아이디어' in type_str or 'idea' in type_str:
                     note_type = '💡 아이디어'
-                elif '할' in extracted and '일' in extracted or '✅' in extracted:
+                elif '할' in type_str and '일' in type_str or 'todo' in type_str or 'task' in type_str:
                     note_type = '✅ 할 일'
-                elif '업데이트' in extracted or '📝' in extracted:
+                elif '업데이트' in type_str or 'update' in type_str:
                     note_type = '📝 업데이트'
-                elif '문제' in extracted or '🔥' in extracted:
+                elif '문제' in type_str or 'issue' in type_str or 'problem' in type_str:
                     note_type = '🔥 문제점'
-            elif '알림시간:' in line:
-                extracted = line.split('알림시간:')[1].strip()
-                if extracted != "없음" and len(extracted) > 5:
-                    alarm_time = extracted
+            
+            # 시간 파싱
+            elif '시간' in line and ':' in line:
+                time_str = line.split(':', 1)[1].strip()
+                if '없음' not in time_str and len(time_str) > 5:
+                    # YYYY-MM-DD HH:MM 형식 추출
+                    time_pattern = r'\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}'
+                    matches = re.findall(time_pattern, time_str)
+                    if matches:
+                        alarm_time = matches[0]
+        
+        # 업무가 매칭 안되면 유사도로 찾기
+        if not menu and menu_list:
+            content_lower = content.lower()
+            for m in menu_list:
+                if m.lower() in content_lower:
+                    menu = m
+                    break
+            
+            # 그래도 없으면 첫 번째 업무 사용
+            if not menu:
+                menu = menu_list[0]
+                st.warning(f"⚠️ 정확한 업무를 찾지 못해 '{menu}'로 분류했습니다")
+        
+        # 유형이 없으면 기본값
+        if not note_type:
+            # 할일 키워드 체크
+            todo_keywords = ['해야', '할', '예정', '필요', '까지']
+            if any(keyword in content for keyword in todo_keywords):
+                note_type = '✅ 할 일'
+            else:
+                note_type = '📝 업데이트'
+            st.warning(f"⚠️ 정확한 유형을 찾지 못해 '{note_type}'로 분류했습니다")
         
         return menu, note_type, alarm_time
         
     except Exception as e:
-        st.warning(f"⚠️ AI 분류 실패: {e}")
+        st.error(f"⚠️ AI 분류 오류: {str(e)}")
+        
+        # 실패 시 기본값 반환
+        if menu_list:
+            return menu_list[0], '📝 업데이트', None
         return None, None, None
 
 def check_pending_tasks():
@@ -932,7 +982,9 @@ elif mode == "💬 대화 이력":
                         "메뉴": related_menu,
                         "유형": "💡 아이디어",
                         "내용": summary,
-                        "이미지": ""
+                        "이미지": "",
+                        "알림시간": "",
+                        "완료": ""
                     }])
                     notes_updated = pd.concat([notes_df, note_row], ignore_index=True)
                     save_sheet(notes_updated, "notes")
