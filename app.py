@@ -121,7 +121,7 @@ if "GEMINI_API_KEY" in st.secrets:
 # 페이지 설정
 st.set_page_config(page_title="스마트 업무 비서", page_icon="📝", layout="wide")
 
-# CSS로 여백 줄이기 + 제목 영역 확보
+# CSS로 여백 최소화
 st.markdown("""
 <style>
     .block-container {
@@ -133,12 +133,20 @@ st.markdown("""
         margin-top: 0rem;
         margin-bottom: 0.5rem;
     }
+    /* caption과 hr 사이 여백 완전 제거 */
+    .element-container:has(p) + hr {
+        margin-top: 0rem !important;
+    }
     hr {
-        margin-top: 0.5rem;
+        margin-top: 0rem;
         margin-bottom: 1rem;
     }
     [data-testid="stSidebar"] {
         width: 250px;
+    }
+    /* caption 아래 여백 제거 */
+    .element-container p {
+        margin-bottom: 0rem;
     }
 </style>
 """, unsafe_allow_html=True)
