@@ -797,6 +797,25 @@ elif mode == "전체 히스토리":
         if filter_menu != "전체":
             filtered_df = filtered_df[filtered_df["메뉴"] == filter_menu]
         
+        # 🔥 여기가 수정된 부분!
+        if filter_type != "전체":
+            filtered_df = filtered_df[filtered_df["유형"] == filter_type]
+        
+        if filter_date == "오늘":
+            filtered_df = filtered_df[filtered_df["날짜"] == today_kst_str()]
+        elif filter_date == "이번 주":
+            week_ago = (now_kst() - timedelta(days=7)).strftime("%Y-%m-%d")
+            filtered_df = filtered_df[filtered_df["날짜"] >= week_ago]
+        elif filter_date == "이번 달":
+            this_month = now_kst().strftime("%Y-%m")
+            filtered_df = filtered_df[filtered_df["날짜"].astype(str).str.startswith(this_month)]
+
+        
+        filtered_df = notes_df.copy()
+        
+        if filter_menu != "전체":
+            filtered_df = filtered_df[filtered_df["메뉴"] == filter_menu]
+        
         if filter_type != "전체":
             filtered_df = filtered_df[filtered_df["유형"] == filter_type]
         
