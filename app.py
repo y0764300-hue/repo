@@ -31,7 +31,6 @@ def load_sheet(worksheet):
     try:
         df = conn.read(worksheet=worksheet, ttl=0)
         
-        # None이거나 비어있는지 체크
         if df is None or len(df) == 0:
             if worksheet == "notes":
                 return pd.DataFrame(columns=['날짜', '시간', '메뉴', '유형', '내용', '이미지'])
@@ -40,10 +39,8 @@ def load_sheet(worksheet):
             elif worksheet == "config":
                 return pd.DataFrame(columns=["메뉴명", "시트정보", "트리거정보", "업무설명", "메일발송설정"])
         
-        # 결측값 처리
         df = df.fillna("")
         
-        # 문자열 변환 및 정리
         for col in df.columns:
             if df[col].dtype == 'object':
                 df[col] = df[col].astype(str).str.strip()
@@ -82,7 +79,6 @@ def upload_to_drive(image_file, filename):
             'parents': [st.secrets["GOOGLE_DRIVE_FOLDER_ID"]]
         }
         
-        # 이미지 데이터 처리
         if hasattr(image_file, 'read'):
             image_data = image_file.read()
             image_file.seek(0)
@@ -101,7 +97,6 @@ def upload_to_drive(image_file, filename):
             fields='id, webViewLink'
         ).execute()
         
-        # 공개 권한 설정
         service.permissions().create(
             fileId=file['id'],
             body={'type': 'anyone', 'role': 'reader'}
@@ -121,46 +116,28 @@ if "GEMINI_API_KEY" in st.secrets:
 st.set_page_config(page_title="스마트 업무 비서", page_icon="📝", layout="wide")
 st.title("📝 스마트 업무 비서")
 
-# ========== 사이드바: API 상태 & 캐시 초기화 ==========
+# ========== 사이드바: 모드 선택만 ==========
 with st.sidebar:
-    st.markdown("### 🔑 AI 설정")
-    if "GEMINI_API_KEY" in st.secrets:
-        st.success("🟢 Gemini AI 연결됨")
-    else:
-        st.warning("🔴 API 키 없음")
+    st.markdown("## 모드 선택")
     
-    st.markdown("---")
-    
-    if st.button("🔄 캐시 초기화", help="데이터 새로고침"):
-        st.session_state.clear()
-        st.cache_data.clear()
-        st.cache_resource.clear()
-        st.success("✅ 캐시 초기화 완료!")
-        st.rerun()
-    
-    st.markdown("---")
-
-# 사이드바 모드 선택
-mode = st.sidebar.radio(
-    "모드 선택",
-    ["📝 업무 기록하기", "📋 전체 히스토리", "💬 대화 이력", "📊 일일 리포트", "⚙️ 메뉴/설정 관리"]
-)
+    mode = st.radio(
+        "메뉴",
+        ["📝 업무 기록하기", "📋 전체 히스토리", "💬 대화 이력", "📊 일일 리포트", "⚙️ 메뉴/설정 관리"],
+        label_visibility="collapsed"
+    )
 
 # ================== 모드 1: 업무 기록하기 ==================
 if mode == "📝 업무 기록하기":
     st.header("📝 업무 기록하기")
     
-    # config 로드
     config_df = load_sheet("config")
     
-    # 데이터 확인
     if config_df.empty or len(config_df) == 0:
         st.error("⚠️ config 시트를 불러올 수 없습니다!")
         st.info("💡 사이드바의 '🔄 캐시 초기화' 버튼을 눌러주세요")
         st.info("💡 또는 '⚙️ 메뉴/설정 관리'에서 업무를 등록하세요")
         st.stop()
     
-    # 메뉴명 컬럼 확인
     if "메뉴명" not in config_df.columns:
         st.error("❌ config 시트에 '메뉴명' 컬럼이 없습니다!")
         st.stop()
@@ -171,17 +148,14 @@ if mode == "📝 업무 기록하기":
         st.warning("⚠️ 등록된 업무가 없습니다. 설정 메뉴에서 업무를 먼저 등록하세요.")
         st.stop()
     
-    # 성공 메시지
     st.success(f"✅ {len(menu_list)}개 업무 로드 완료")
     
-    # 클립보드 이미지 붙여넣기 (Form 밖)
     st.write("**🖼️ 이미지 추가 (선택)**")
     paste_result = pbutton(
         label="📋 클립보드에서 이미지 붙여넣기 (Ctrl+V)",
         key="clipboard_paste"
     )
     
-    # 클립보드 이미지 미리보기
     if paste_result.image_data is not None:
         st.success("✅ 클립보드 이미지 준비됨!")
         st.image(paste_result.image_data, width=200)
@@ -189,7 +163,6 @@ if mode == "📝 업무 기록하기":
     
     st.divider()
     
-    # 폼 사용으로 자동 초기화
     with st.form(key="note_form", clear_on_submit=True):
         selected_menu = st.selectbox("📁 업무 선택", menu_list)
         note_type = st.radio("🏷️ 유형", ["💡 아이디어", "✅ 업데이트", "🔥 문제점"], horizontal=True)
@@ -209,10 +182,8 @@ if mode == "📝 업무 기록하기":
         
         if submit:
             if content.strip():
-                # 이미지 처리
                 image_url = None
                 
-                # 클립보드 이미지 우선
                 if "pending_image" in st.session_state:
                     with st.spinner("📤 이미지 업로드 중..."):
                         timestamp = now_kst().strftime("%Y%m%d_%H%M%S")
@@ -239,7 +210,6 @@ if mode == "📝 업무 기록하기":
                         filename = f"{timestamp}_{uploaded_file.name}"
                         image_url = upload_to_drive(uploaded_file, filename)
                 
-                # notes 시트에 저장
                 notes_df = load_sheet("notes")
                 new_row = pd.DataFrame([{
                     "날짜": today_kst_str(),
@@ -260,7 +230,6 @@ if mode == "📝 업무 기록하기":
             else:
                 st.warning("⚠️ 내용을 입력하세요")
     
-    # 최근 히스토리 미리보기
     st.divider()
     st.subheader(f"📚 최근 기록 (전체는 '📋 전체 히스토리' 메뉴에서)")
     
@@ -285,7 +254,6 @@ elif mode == "📋 전체 히스토리":
     if not notes_df.empty and not config_df.empty:
         menu_list = config_df["메뉴명"].tolist()
         
-        # 필터링 옵션
         col1, col2, col3 = st.columns([1, 1, 1])
         with col1:
             filter_menu = st.selectbox(
@@ -303,7 +271,6 @@ elif mode == "📋 전체 히스토리":
                 ["전체 기간", "오늘", "이번 주", "이번 달"]
             )
         
-        # 필터 적용
         filtered_df = notes_df.copy()
         
         if filter_menu != "전체 보기":
@@ -328,7 +295,6 @@ elif mode == "📋 전체 히스토리":
                 col1, col2 = st.columns([6, 1])
                 
                 with col1:
-                    # 수정 모드 체크
                     if f"edit_{idx}" in st.session_state and st.session_state[f"edit_{idx}"]:
                         with st.container(border=True):
                             st.markdown(f"### ✏️ 수정 중: {row['유형']} [{row['메뉴']}]")
@@ -353,7 +319,6 @@ elif mode == "📋 전체 히스토리":
                                     st.session_state[f"edit_{idx}"] = False
                                     st.rerun()
                     else:
-                        # 일반 보기 모드
                         with st.expander(f"{row['유형']} [{row['메뉴']}] {row['날짜']} {row['시간']}"):
                             st.markdown(row['내용'])
                             if row['이미지'] and str(row['이미지']) != 'nan' and str(row['이미지']).strip():
@@ -383,7 +348,6 @@ elif mode == "📋 전체 히스토리":
 elif mode == "💬 대화 이력":
     st.header("💬 대화 이력")
     
-    # 대화 내용 입력 섹션
     with st.expander("📥 대화 내용 가져오기", expanded=True):
         tab1, tab2 = st.tabs(["📝 직접 붙여넣기", "📂 파일 업로드"])
         
@@ -414,7 +378,6 @@ elif mode == "💬 대화 이력":
                     else:
                         st.warning("⚠️ 주제와 내용을 모두 입력하세요")
         
-        # 🔻 여기부터 전부 한 단계 들여쓰기 (with tab2: 내부)
         with tab2:
             uploaded_file = st.file_uploader(
                 "📂 파일 업로드 (.txt, .md)", 
@@ -424,21 +387,15 @@ elif mode == "💬 대화 이력":
             
             if uploaded_file is not None:
                 try:
-                    # 파일 내용 읽기
                     file_content = uploaded_file.getvalue().decode("utf-8")
                     
                     st.success(f"✅ 파일 로드 완료: {uploaded_file.name}")
                     st.info(f"📊 전체 길이: {len(file_content):,} 자")
                     
-                    # 파일이 너무 크면 경고
                     if len(file_content) > 50000:
-                        st.warning(
-                            f"⚠️ 파일이 매우 큽니다 ({len(file_content):,}자). "
-                            "AI 요약 시 최대 50,000자만 처리됩니다."
-                        )
+                        st.warning(f"⚠️ 파일이 매우 큽니다 ({len(file_content):,}자). AI 요약 시 최대 50,000자만 처리됩니다.")
                     
                     with st.form(key="chat_form_file", clear_on_submit=False):
-                        # 파일명을 기본 주제로 사용
                         default_topic = uploaded_file.name.replace('.txt', '').replace('.md', '')
                         
                         file_topic = st.text_input(
@@ -447,13 +404,10 @@ elif mode == "💬 대화 이력":
                             key="file_topic"
                         )
                         
-                        # 파일 내용 미리보기
                         preview_length = min(2000, len(file_content))
                         st.text_area(
                             "📝 파일 내용 미리보기", 
-                            value=file_content[:preview_length] + (
-                                "..." if len(file_content) > preview_length else ""
-                            ),
+                            value=file_content[:preview_length] + ("..." if len(file_content) > preview_length else ""),
                             height=200,
                             disabled=True
                         )
@@ -495,7 +449,6 @@ elif mode == "💬 대화 이력":
                                     try:
                                         model = genai.GenerativeModel('gemini-2.5-flash')
                                         
-                                        # 최대 50,000자로 제한
                                         content_to_analyze = file_content[:50000]
                                         
                                         prompt = f"""다음 대화를 분석해서 정리해줘:
@@ -520,7 +473,6 @@ elif mode == "💬 대화 이력":
                                         response = model.generate_content(prompt)
                                         summary = response.text
                                         
-                                        # 요약 결과 저장
                                         chats_df = load_sheet("chats")
                                         new_row = pd.DataFrame([{
                                             "날짜": today_kst_str(),
@@ -537,10 +489,7 @@ elif mode == "💬 대화 이력":
                                             st.markdown(summary)
                                             
                                             if len(file_content) > 50000:
-                                                st.info(
-                                                    f"ℹ️ 전체 {len(file_content):,}자 중 50,000자만 분석되었습니다. "
-                                                    "전체 분석이 필요하면 '✂️ 분할 요약' 버튼을 사용하세요."
-                                                )
+                                                st.info(f"ℹ️ 전체 {len(file_content):,}자 중 50,000자만 분석되었습니다. 전체 분석이 필요하면 '✂️ 분할 요약' 버튼을 사용하세요.")
                                             
                                             st.rerun()
                                     
@@ -557,7 +506,6 @@ elif mode == "💬 대화 이력":
                                     try:
                                         model = genai.GenerativeModel('gemini-2.5-flash')
                                         
-                                        # 파일을 40,000자씩 분할
                                         chunk_size = 40000
                                         chunks = []
                                         for i in range(0, len(file_content), chunk_size):
@@ -581,12 +529,9 @@ elif mode == "💬 대화 이력":
 """
                                             
                                             response = model.generate_content(prompt)
-                                            summaries.append(
-                                                f"### 📄 파트 {idx+1}/{len(chunks)}\n\n{response.text}"
-                                            )
+                                            summaries.append(f"### 📄 파트 {idx+1}/{len(chunks)}\n\n{response.text}")
                                             progress_bar.progress((idx + 1) / len(chunks))
                                         
-                                        # 최종 통합 요약
                                         combined = "\n\n---\n\n".join(summaries)
                                         
                                         final_prompt = f"""다음은 긴 대화를 {len(chunks)}개 부분으로 나눠 요약한 내용입니다.
@@ -603,15 +548,12 @@ elif mode == "💬 대화 이력":
                                         final_response = model.generate_content(final_prompt)
                                         final_summary = final_response.text
                                         
-                                        # 저장
                                         chats_df = load_sheet("chats")
                                         new_row = pd.DataFrame([{
                                             "날짜": today_kst_str(),
                                             "시간": now_kst().strftime("%H:%M:%S"),
                                             "주제": f"[분할 요약] {file_topic}",
-                                            "전체내용": (
-                                                f"{final_summary}\n\n---\n\n### 📚 상세 부분별 요약\n\n{combined}"
-                                            )
+                                            "전체내용": f"{final_summary}\n\n---\n\n### 📚 상세 부분별 요약\n\n{combined}"
                                         }])
                                         
                                         updated_df = pd.concat([chats_df, new_row], ignore_index=True)
@@ -629,10 +571,7 @@ elif mode == "💬 대화 이력":
                 
                 except Exception as e:
                     st.error(f"❌ 파일 읽기 실패: {e}")
-
-
     
-    # AI 요약 기능
     st.divider()
     st.subheader("🤖 오늘 대화 전체 AI 요약")
     
@@ -685,7 +624,6 @@ elif mode == "💬 대화 이력":
     else:
         st.warning("🔴 AI 기능을 사용하려면 API 키가 필요합니다")
     
-    # AI 요약 결과 표시 및 저장
     if "ai_summary" in st.session_state:
         st.markdown("### 📄 요약 결과")
         st.markdown(st.session_state["ai_summary"])
@@ -707,7 +645,6 @@ elif mode == "💬 대화 이력":
                 summary = st.session_state["ai_summary"]
                 topic = st.session_state["summary_topic"]
                 
-                # 1. chats 저장
                 chats_df = load_sheet("chats")
                 chat_row = pd.DataFrame([{
                     "날짜": today_kst_str(),
@@ -718,7 +655,6 @@ elif mode == "💬 대화 이력":
                 chats_updated = pd.concat([chats_df, chat_row], ignore_index=True)
                 save_sheet(chats_updated, "chats")
                 
-                # 2. notes 저장 (업무 선택 시)
                 if related_menu != "없음":
                     notes_df = load_sheet("notes")
                     note_row = pd.DataFrame([{
@@ -743,7 +679,6 @@ elif mode == "💬 대화 이력":
                 del st.session_state["summary_topic"]
                 st.rerun()
     
-    # 히스토리 표시
     st.divider()
     st.subheader("📚 대화 히스토리")
     chats_df = load_sheet("chats")
@@ -867,3 +802,24 @@ elif mode == "⚙️ 메뉴/설정 관리":
     else:
         st.warning("⚠️ config 시트가 비어있습니다")
         st.info("구글 시트에서 직접 데이터를 입력한 후 '🔄 캐시 초기화'를 눌러주세요")
+
+# ========== 화면 하단: 시스템 설정 ==========
+st.divider()
+with st.expander("⚙️ 시스템 설정", expanded=False):
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.caption("🔑 AI 상태")
+        if "GEMINI_API_KEY" in st.secrets:
+            st.success("✅ Gemini AI 연결됨", icon="🟢")
+        else:
+            st.warning("⚠️ API 키 없음", icon="🔴")
+    
+    with col2:
+        st.caption("🔄 캐시 관리")
+        if st.button("캐시 초기화", help="데이터 새로고침", use_container_width=True):
+            st.session_state.clear()
+            st.cache_data.clear()
+            st.cache_resource.clear()
+            st.success("✅ 캐시 초기화 완료!")
+            st.rerun()
