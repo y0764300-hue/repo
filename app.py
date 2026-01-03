@@ -115,7 +115,28 @@ if "GEMINI_API_KEY" in st.secrets:
 # 페이지 설정
 st.set_page_config(page_title="스마트 업무 비서", page_icon="📝", layout="wide")
 
-# 제목
+# CSS로 여백 줄이기
+st.markdown("""
+<style>
+    /* 상단 여백 제거 */
+    .block-container {
+        padding-top: 1rem;
+        padding-bottom: 0rem;
+    }
+    /* 헤더 여백 줄이기 */
+    h1 {
+        margin-top: 0rem;
+        margin-bottom: 0.5rem;
+    }
+    /* divider 여백 줄이기 */
+    hr {
+        margin-top: 0.5rem;
+        margin-bottom: 1rem;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+# 제목 (여백 최소화)
 st.markdown("# 📝 스마트 업무 비서")
 st.caption("AI 기반 업무 기록 및 관리 시스템")
 st.divider()
