@@ -120,6 +120,58 @@ def upload_to_drive(image_file, filename):
     except Exception as e:
         st.error(f"이미지 업로드 실패: {e}")
         return None
+    
+def create_calendar_event(title, description, start_datetime_str, menu=""):
+    """구글 캘린더에 일정 등록"""
+    try:
+        credentials = service_account.Credentials.from_service_account_info(
+            st.secrets["gcp_service_account"],
+            scopes=['https://www.googleapis.com/auth/calendar']
+        )
+        service = build('calendar', 'v3', credentials=credentials)
+        
+        # 시작 시간 파싱
+        start_dt = datetime.strptime(start_datetime_str, "%Y-%m-%d %H:%M")
+        start_dt = TZ_KST.localize(start_dt)
+        
+        # 종료 시간 (1시간 후)
+        end_dt = start_dt + timedelta(hours=1)
+        
+        # 이벤트 생성
+        event = {
+            'summary': f"[{menu}] {title[:50]}...",
+            'description': description,
+            'start': {
+                'dateTime': start_dt.isoformat(),
+                'timeZone': 'Asia/Seoul',
+            },
+            'end': {
+                'dateTime': end_dt.isoformat(),
+                'timeZone': 'Asia/Seoul',
+            },
+            'reminders': {
+                'useDefault': False,
+                'overrides': [
+                    {'method': 'popup', 'minutes': 30},
+                    {'method': 'popup', 'minutes': 10},
+                ],
+            },
+        }
+        
+        # 캘린더 ID (서비스 계정에 공유한 캘린더)
+        calendar_id = 'primary'  # 또는 본인 Gmail 주소
+        
+        event_result = service.events().insert(
+            calendarId=calendar_id,
+            body=event
+        ).execute()
+        
+        return event_result.get('htmlLink')
+        
+    except Exception as e:
+        st.error(f"캘린더 등록 실패: {e}")
+        return None
+
 
 def ai_classify_note(content, menu_list, config_df):
     """AI로 업무와 유형 자동 분류"""
@@ -700,8 +752,10 @@ if mode == "업무 기록하기":
             
             alarm_time = None
             if note_type == "할일":
-                st.markdown("**⏰ 알림 (선택)**")
+                st.markdown("**⏰ 알림 (구글 캘린더 자동 등록)**")
+                st.caption("📅 시간을 입력하면 구글 캘린더에 자동으로 등록됩니다")
                 col_date, col_time = st.columns(2)
+
                 with col_date:
                     alarm_date = st.date_input("날짜", value=None, label_visibility="collapsed")
                 with col_time:
@@ -788,7 +842,21 @@ if mode == "업무 기록하기":
                         filename = f"{timestamp}_{first_img['name']}"
                         image_url = upload_to_drive(first_img["data"], filename)
                 
+                # 🆕 캘린더 등록 (할일이고 알림시간이 있으면)
+                calendar_link = None
+                if note_type == "할일" and alarm_time:
+                    with st.spinner("📅 캘린더 등록중..."):
+                        calendar_link = create_calendar_event(
+                            title=content[:100],
+                            description=content,
+                            start_datetime_str=alarm_time,
+                            menu=selected_menu
+                        )
+                    if calendar_link:
+                        st.info(f"🔗 [캘린더에서 확인]({calendar_link})")
+                
                 notes_df = load_sheet("notes")
+
                 new_row = pd.DataFrame([{
                     "날짜": today_kst_str(),
                     "시간": now_kst().strftime("%H:%M:%S"),
@@ -804,8 +872,11 @@ if mode == "업무 기록하기":
                 
                 if save_sheet(updated_df, "notes"):
                     st.success("✅ 저장 완료!")
+                    if calendar_link:
+                        st.success("📅 캘린더 등록 완료!")
                     st.session_state.uploaded_images = []
                     st.rerun()
+
                 else:
                     st.error("❌ 저장 실패")
             else:
