@@ -33,11 +33,11 @@ def today_kst_str():
 # Google Sheets 연결
 conn = st.connection("gsheets", type=GSheetsConnection)
 
-@st.cache_data(ttl=60)  # 🆕 추가!
+@st.cache_data(ttl=60, show_spinner=False)  # 🆕 show_spinner 추가
 def load_sheet(worksheet):
     """시트 로드 - 캐시 적용"""
     try:
-        df = conn.read(worksheet=worksheet, ttl=300)  # 🆕 ttl=300으로 변경
+        df = conn.read(worksheet=worksheet, ttl=60)  # 🆕 ttl=60으로 통일
         
         if df is None or len(df) == 0:
             if worksheet == "notes":
@@ -70,15 +70,20 @@ def load_sheet(worksheet):
         elif worksheet == "config":
             return pd.DataFrame(columns=["메뉴명", "시트정보", "트리거정보", "업무설명", "메일발송설정"])
 
+
 def save_sheet(df, worksheet):
-    """시트 저장"""
+    """시트 저장 후 캐시 초기화"""
     try:
         conn.update(worksheet=worksheet, data=df)
-        load_sheet.clear()  # 🆕 캐시 초기화
+        
+        # 🆕 전체 캐시 초기화 (중요!)
+        st.cache_data.clear()
+        
         return True
     except Exception as e:
         st.error(f"저장 실패 ({worksheet}): {e}")
         return False
+
 
 
 def upload_to_drive(image_file, filename):
@@ -689,6 +694,8 @@ with st.sidebar:
         ["업무 기록하기", "전체 히스토리", "대화 이력", "일일 리포트", "업무 포트폴리오", "메뉴/설정 관리"],
         label_visibility="collapsed"
     )
+
+
 
 # ================== 모드 1: 업무 기록하기 ==================
 if mode == "업무 기록하기":
