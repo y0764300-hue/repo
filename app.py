@@ -33,10 +33,11 @@ def today_kst_str():
 # Google Sheets 연결
 conn = st.connection("gsheets", type=GSheetsConnection)
 
+@st.cache_data(ttl=60)  # 🆕 추가!
 def load_sheet(worksheet):
-    """시트 로드 - 안전한 버전"""
+    """시트 로드 - 캐시 적용"""
     try:
-        df = conn.read(worksheet=worksheet, ttl=0)
+        df = conn.read(worksheet=worksheet, ttl=300)  # 🆕 ttl=300으로 변경
         
         if df is None or len(df) == 0:
             if worksheet == "notes":
@@ -73,10 +74,12 @@ def save_sheet(df, worksheet):
     """시트 저장"""
     try:
         conn.update(worksheet=worksheet, data=df)
+        load_sheet.clear()  # 🆕 캐시 초기화
         return True
     except Exception as e:
         st.error(f"저장 실패 ({worksheet}): {e}")
         return False
+
 
 def upload_to_drive(image_file, filename):
     """Google Drive에 이미지 업로드"""
