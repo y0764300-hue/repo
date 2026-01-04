@@ -1499,69 +1499,129 @@ elif mode == "업무 포트폴리오":
 
 # ================== 모드 6: 메뉴/설정 관리 ==================
 elif mode == "메뉴/설정 관리":
-    st.markdown("## ⚙️ 설정")
+    st.markdown("## ⚙️ 업무 관리")
     
     config_df = load_sheet("config")
     
-    st.markdown("### 📁 등록된 업무")
-    
     if not config_df.empty:
+        st.markdown("### 📂 등록된 업무")
+        
         for idx, row in config_df.iterrows():
-            with st.expander(f"**{row['메뉴명']}**"):
-                st.text(f"설명: {row.get('업무설명', '없음')}")
+            menu_name = row["메뉴명"]
+            menu_desc = row.get("업무설명", "")
+            
+            with st.expander(f"**{idx+1}. {menu_name}**", expanded=False):
                 
-                if st.button("🗑️ 삭제", key=f"del_menu_{idx}", use_container_width=True):
-                    config_df = config_df.drop(idx)
-                    if save_sheet(config_df, "config"):
-                        st.success("삭제!")
-                        st.rerun()
+                # 업무 정보 표시
+                st.markdown("#### 📝 업무 설명")
+                if menu_desc and str(menu_desc).strip():
+                    st.info(menu_desc)
+                else:
+                    st.caption("_업무 설명이 없습니다._")
+                
+                st.divider()
+                
+                # 수정 폼
+                st.markdown("#### ✏️ 수정하기")
+                with st.form(key=f"edit_menu_{idx}"):
+                    
+                    new_menu_name = st.text_input(
+                        "업무명",
+                        value=menu_name,
+                        key=f"menu_name_{idx}"
+                    )
+                    
+                    new_menu_desc = st.text_area(
+                        "업무 설명",
+                        value=menu_desc if menu_desc else "",
+                        height=150,
+                        placeholder="업무에 대한 설명, 주요 함수, 만든 방법 등을 자유롭게 작성하세요...",
+                        key=f"menu_desc_{idx}"
+                    )
+                    
+                    col1, col2 = st.columns(2)
+                    
+                    with col1:
+                        submit_edit = st.form_submit_button(
+                            "💾 수정 저장",
+                            type="primary",
+                            use_container_width=True
+                        )
+                    
+                    with col2:
+                        submit_delete = st.form_submit_button(
+                            "🗑️ 삭제",
+                            use_container_width=True
+                        )
+                    
+                    # 수정 처리
+                    if submit_edit:
+                        if new_menu_name.strip():
+                            config_df.loc[idx, "메뉴명"] = new_menu_name.strip()
+                            config_df.loc[idx, "업무설명"] = new_menu_desc.strip()
+                            
+                            if save_sheet(config_df, "config"):
+                                st.success(f"✅ '{new_menu_name}' 수정 완료!")
+                                st.rerun()
+                            else:
+                                st.error("❌ 수정 실패")
+                        else:
+                            st.warning("⚠️ 업무명을 입력하세요")
+                    
+                    # 삭제 처리
+                    if submit_delete:
+                        config_df = config_df.drop(idx)
+                        
+                        if save_sheet(config_df, "config"):
+                            st.success(f"✅ '{menu_name}' 삭제 완료!")
+                            st.rerun()
+                        else:
+                            st.error("❌ 삭제 실패")
         
         st.divider()
-        st.markdown("### ➕ 업무 추가")
-        
-        with st.form(key="add_menu_form", clear_on_submit=True):
-            new_menu = st.text_input("업무명")
-            new_desc = st.text_area("설명 (선택)", height=100)
-            
-            submit_new = st.form_submit_button("➕ 추가", type="primary", use_container_width=True)
-            
-            if submit_new:
-                if new_menu.strip():
-                    new_row = pd.DataFrame([{
-                        "메뉴명": new_menu,
-                        "시트정보": "",
-                        "트리거정보": "",
-                        "업무설명": new_desc,
-                        "메일발송설정": ""
-                    }])
-                    
-                    updated_df = pd.concat([config_df, new_row], ignore_index=True)
-                    
-                    if save_sheet(updated_df, "config"):
-                        st.success(f"✅ '{new_menu}' 추가!")
-                        st.rerun()
-                else:
-                    st.warning("⚠️ 업무명 필요")
     
-    else:
-        st.warning("⚠️ 업무 없음")
+    # 새 업무 추가
+    st.markdown("### ➕ 새 업무 추가")
+    
+    with st.form(key="add_menu_form", clear_on_submit=True):
         
-        with st.form(key="first_menu_form", clear_on_submit=True):
-            first_menu = st.text_input("첫 업무명")
-            first_desc = st.text_area("설명", height=100)
-            
-            submit_first = st.form_submit_button("➕ 추가", type="primary", use_container_width=True)
-            
-            if submit_first:
-                if first_menu.strip():
-                    new_df = pd.DataFrame([{
-                        "메뉴명": first_menu,
-                        "시트정보": "",
-                        "트리거정보": "",
-                        "업무설명": first_desc,
-                        "메일발송설정": ""
-                    }])
-                    
-                    if save_sheet(new_df, "config"):
-                        st.success(f"✅ '{first_menu}' 추가!")
-                        st.rerun()
+        new_menu = st.text_input(
+            "업무명",
+            placeholder="예: 자재관리, 생산계획, 품질관리..."
+        )
+        
+        new_desc = st.text_area(
+            "업무 설명",
+            height=150,
+            placeholder="예: Google Sheets 자동화, Python 스크립트, 주요 함수: load_data(), process_inventory()..."
+        )
+        
+        submit_new = st.form_submit_button(
+            "✅ 추가",
+            type="primary",
+            use_container_width=True
+        )
+        
+        if submit_new:
+            if new_menu.strip():
+                new_row = pd.DataFrame([{
+                    "메뉴명": new_menu.strip(),
+                    "시트정보": "",
+                    "트리거정보": "",
+                    "업무설명": new_desc.strip(),
+                    "메일발송설정": ""
+                }])
+                
+                updated_df = pd.concat([config_df, new_row], ignore_index=True)
+                
+                if save_sheet(updated_df, "config"):
+                    st.success(f"✅ '{new_menu}' 추가 완료!")
+                    st.rerun()
+                else:
+                    st.error("❌ 추가 실패")
+            else:
+                st.warning("⚠️ 업무명을 입력하세요")
+    
+    # 처음 등록하는 경우
+    if config_df.empty:
+        st.warning("⚠️ 등록된 업무가 없습니다. 첫 업무를 추가하세요!")
