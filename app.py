@@ -297,7 +297,9 @@ st.markdown("""
         }
         
         h2 {
-            font-size: 1.3rem !important;
+            font-size: 1.2rem !important;
+            white-space: nowrap !important;
+            overflow: visible !important;
         }
         
         h3 {
@@ -321,11 +323,12 @@ st.markdown("""
         }
         
         .stRadio [role="radiogroup"] {
-            flex-direction: column !important;
+            flex-direction: row !important;
         }
         
         .stRadio [role="radiogroup"] label {
-            width: 100% !important;
+            width: auto !important;
+            flex: 1 !important;
             margin-bottom: 0.5rem !important;
         }
         
@@ -363,6 +366,8 @@ st.markdown("""
         font-weight: 600 !important;
         margin-top: 1.5rem !important;
         margin-bottom: 1rem !important;
+        white-space: nowrap !important;
+        overflow: visible !important;
     }
     
     h3 {
@@ -572,6 +577,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+
 # ============ 헤더 ============
 st.markdown("# 스마트 업무 비서")
 st.caption("🤖 AI 기반 업무 기록 및 관리")
@@ -624,14 +630,27 @@ if mode == "업무 기록하기":
         st.warning("⚠️ 등록된 업무가 없습니다.")
         st.stop()
     
-    st.markdown("## 📝 업무 기록하기")
+    st.markdown("## 📝 업무 기록")  # 제목 짧게 수정
     
-    ai_mode = st.radio(
-        "입력 모드",
-        ["🤖 AI 자동", "✋ 수동"],
-        horizontal=True,
-        help="AI 모드: 내용만 입력하면 자동 판단"
-    )
+    # AI 자동/수동 선택 - 가로 배치 강제
+    col_mode1, col_mode2 = st.columns(2)
+    with col_mode1:
+        ai_auto = st.button("🤖 AI 자동", key="btn_ai", use_container_width=True, 
+                           type="primary" if st.session_state.get("input_mode", "ai") == "ai" else "secondary")
+    with col_mode2:
+        manual = st.button("✋ 수동", key="btn_manual", use_container_width=True,
+                          type="primary" if st.session_state.get("input_mode", "ai") == "manual" else "secondary")
+    
+    # 모드 상태 저장
+    if ai_auto:
+        st.session_state.input_mode = "ai"
+    if manual:
+        st.session_state.input_mode = "manual"
+    
+    if "input_mode" not in st.session_state:
+        st.session_state.input_mode = "ai"
+    
+    ai_mode = "🤖 AI 자동" if st.session_state.input_mode == "ai" else "✋ 수동"
     
     if "uploaded_images" not in st.session_state:
         st.session_state.uploaded_images = []
@@ -640,31 +659,74 @@ if mode == "업무 기록하기":
         
         if ai_mode == "✋ 수동":
             selected_menu = st.selectbox("📁 업무", menu_list)
-            note_type = st.radio(
-                "🏷️ 유형", 
-                ["아이디어", "할일", "업데이트", "문제점"], 
-                horizontal=False
-            )
-            content = st.text_area(
-                "📝 내용", 
-                height=150,
-                placeholder="내용을 입력하세요..."
-            )
+            
+            # 유형 선택 - 가로 배치
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                type_idea = st.checkbox("💡 아이디어", key="type_idea")
+            with col2:
+                type_todo = st.checkbox("✅ 할일", key="type_todo")
+            with col3:
+                type_update = st.checkbox("📝 업데이트", key="type_update", value=True)
+            with col4:
+                type_issue = st.checkbox("🔥 문제점", key="type_issue")
+            
+            # 선택된 유형 결정
+            if type_idea:
+                note_type = "아이디어"
+            elif type_todo:
+                note_type = "할일"
+            elif type_issue:
+                note_type = "문제점"
+            else:
+                note_type = "업데이트"
+            
+            # 내용 입력란과 저장 버튼을 나란히 배치
+            col_content, col_save = st.columns([5, 1])
+            
+            with col_content:
+                content = st.text_area(
+                    "📝 내용", 
+                    height=150,
+                    placeholder="내용을 입력하세요...",
+                    label_visibility="collapsed"
+                )
+            
+            with col_save:
+                # 저장 버튼을 세로로 중앙 배치
+                st.write("")  # 여백
+                st.write("")
+                submit = st.form_submit_button("💾\n저장", type="primary", use_container_width=True)
             
             alarm_time = None
             if note_type == "할일":
                 st.markdown("**⏰ 알림 (선택)**")
-                alarm_date = st.date_input("날짜", value=None)
-                alarm_time_input = st.time_input("시간", value=None)
+                col_date, col_time = st.columns(2)
+                with col_date:
+                    alarm_date = st.date_input("날짜", value=None, label_visibility="collapsed")
+                with col_time:
+                    alarm_time_input = st.time_input("시간", value=None, label_visibility="collapsed")
                 
                 if alarm_date and alarm_time_input:
                     alarm_time = f"{alarm_date.strftime('%Y-%m-%d')} {alarm_time_input.strftime('%H:%M')}"
         else:
-            content = st.text_area(
-                "📝 내용만 입력", 
-                height=200,
-                placeholder="AI가 자동으로 분류합니다..."
-            )
+            # AI 자동 모드
+            col_content, col_save = st.columns([5, 1])
+            
+            with col_content:
+                content = st.text_area(
+                    "📝 AI가 자동 분류", 
+                    height=200,
+                    placeholder="내용만 입력하면 AI가 알아서 분류합니다...",
+                    label_visibility="collapsed"
+                )
+            
+            with col_save:
+                st.write("")
+                st.write("")
+                st.write("")
+                submit = st.form_submit_button("💾\n저장", type="primary", use_container_width=True)
+            
             selected_menu = None
             note_type = None
             alarm_time = None
@@ -692,10 +754,15 @@ if mode == "업무 기록하기":
         if st.session_state.uploaded_images:
             st.info(f"📸 {len(st.session_state.uploaded_images)}개")
             for idx, img in enumerate(st.session_state.uploaded_images):
-                st.image(img["data"], caption=img["name"], use_container_width=True)
+                col_img, col_del = st.columns([4, 1])
+                with col_img:
+                    st.image(img["data"], use_container_width=True)
+                with col_del:
+                    if st.form_submit_button("🗑️", key=f"del_img_form_{idx}"):
+                        st.session_state.uploaded_images.pop(idx)
+                        st.rerun()
         
-        submit = st.form_submit_button("💾 저장", type="primary", use_container_width=True)
-        
+        # submit 처리는 폼 내에서
         if submit:
             if content.strip():
                 
@@ -744,17 +811,6 @@ if mode == "업무 기록하기":
             else:
                 st.warning("⚠️ 내용 입력 필요")
     
-    if st.session_state.uploaded_images:
-        st.markdown("**이미지 관리**")
-        for idx, img in enumerate(st.session_state.uploaded_images):
-            col1, col2 = st.columns([4, 1])
-            with col1:
-                st.text(f"📷 {img['name'][:20]}...")
-            with col2:
-                if st.button("🗑️", key=f"del_img_{idx}"):
-                    st.session_state.uploaded_images.pop(idx)
-                    st.rerun()
-    
     st.divider()
     st.markdown("## 📚 최근 기록")
     
@@ -777,6 +833,7 @@ if mode == "업무 기록하기":
                     st.image(row['이미지'], use_container_width=True)
     else:
         st.info("📭 기록 없음")
+
 
 # ================== 모드 2: 전체 히스토리 ==================
 elif mode == "전체 히스토리":
