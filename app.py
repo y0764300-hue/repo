@@ -188,7 +188,14 @@ def ai_classify_note(content, menu_list, config_df):
             else:
                 menu_info += f"{idx+1}. {row['메뉴명']}\n"
         
+        # 현재 시간 정보 추가
+        now = now_kst()
+        today = now.strftime("%Y-%m-%d")
+        current_time = now.strftime("%H:%M")
+        
         prompt = f"""다음 메모를 분석해서 업무와 유형을 판단해줘.
+
+**현재 시각: {today} {current_time}**
 
 등록된 업무:
 {menu_info}
@@ -202,10 +209,22 @@ def ai_classify_note(content, menu_list, config_df):
 메모 내용:
 {content}
 
-아래 형식으로 정확히 답변해줘:
+시간 추출 규칙:
+- "오늘 9시" → {today} 09:00
+- "오늘 오후 9시" → {today} 21:00
+- "내일 3시" → {(now + timedelta(days=1)).strftime("%Y-%m-%d")} 15:00
+- "1월 5일 오후 2시" → 2026-01-05 14:00
+- 시간 언급 없으면 → 없음
+
+아래 형식으로 **정확히** 답변해줘:
 업무번호: [1~{len(menu_list)} 중 하나]
 유형: [아이디어/할일/업데이트/문제점 중 하나]
-시간: [할일이고 시간 언급되면 YYYY-MM-DD HH:MM, 없으면 없음]"""
+시간: [YYYY-MM-DD HH:MM 형식 또는 없음]
+
+예시:
+업무번호: 1
+유형: 할일
+시간: {today} 21:00"""
 
         response = model.generate_content(prompt)
         result = response.text.strip()
@@ -244,6 +263,7 @@ def ai_classify_note(content, menu_list, config_df):
             elif '시간' in line and ':' in line:
                 time_str = line.split(':', 1)[1].strip()
                 if '없음' not in time_str and len(time_str) > 5:
+                    # 시간 패턴 찾기
                     time_pattern = r'\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}'
                     matches = re.findall(time_pattern, time_str)
                     if matches:
@@ -255,6 +275,10 @@ def ai_classify_note(content, menu_list, config_df):
         if not note_type:
             note_type = '업데이트'
         
+        # 디버깅용 출력
+        if note_type == "할일":
+            st.info(f"🤖 AI 분석 결과: {menu} / {note_type} / 시간: {alarm_time if alarm_time else '없음'}")
+        
         return menu, note_type, alarm_time
         
     except Exception as e:
@@ -262,6 +286,7 @@ def ai_classify_note(content, menu_list, config_df):
         if menu_list:
             return menu_list[0], '업데이트', None
         return None, None, None
+
 
 def check_pending_tasks():
     """할 일 알림 체크"""
