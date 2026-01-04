@@ -159,7 +159,7 @@ def create_calendar_event(title, description, start_datetime_str, menu=""):
         }
         
         # 캘린더 ID (서비스 계정에 공유한 캘린더)
-        calendar_id = 'primary'  # 또는 본인 Gmail 주소
+        calendar_id = 'wldydxo09@gmail.com'  # 또는 본인 Gmail 주소
         
         event_result = service.events().insert(
             calendarId=calendar_id,
