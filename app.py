@@ -182,7 +182,7 @@ def ai_classify_note(content, menu_list, config_df):
         if "GEMINI_API_KEY" not in st.secrets:
             return None, None, None, None
 
-        model = genai.GenerativeModel('gemini-2.0-flash-exp')
+        model = genai.GenerativeModel('gemini-2.5-flash')
 
         menu_info = ""
         for idx, row in config_df.iterrows():
@@ -533,7 +533,7 @@ if mode == "업무 기록하기":
             with col2:
                 type_todo = st.checkbox("✅ 할일", key="type_todo")
             with col3:
-                type_update = st.checkbox("📝 업데이트", key="type_update", value=True)
+                type_update = st.checkbox("📝 업데이트", key="type_update")
             with col4:
                 type_issue = st.checkbox("🔥 문제점", key="type_issue")
 
@@ -752,18 +752,20 @@ elif mode == "전체 히스토리":
     if not notes_df.empty and not config_df.empty:
         menu_list = config_df["메뉴명"].tolist()
 
-        col_filter1, col_filter2, col_filter3 = st.columns(3)
+        # 필터 4개 가로 배치
+        col_f1, col_f2, col_f3, col_f4 = st.columns(4)
 
-        with col_filter1:
+        with col_f1:
             filter_menu = st.selectbox("📁 업무", ["전체"] + menu_list)
 
-        with col_filter2:
+        with col_f2:
             filter_type = st.selectbox("🏷️ 유형", ["전체", "아이디어", "할일", "업데이트", "문제점"])
 
-        with col_filter3:
+        with col_f3:
             filter_status = st.selectbox("✅ 상태", ["전체", "미완료만", "완료만"])
 
-        filter_date = st.selectbox("📅 기간", ["전체", "오늘", "이번 주", "이번 달"])
+        with col_f4:
+            filter_date = st.selectbox("📅 기간", ["전체", "오늘", "이번 주", "이번 달"])
 
         filtered_df = notes_df.copy()
 
@@ -773,6 +775,7 @@ elif mode == "전체 히스토리":
         if filter_type != "전체":
             filtered_df = filtered_df[filtered_df["유형"] == filter_type]
 
+        # 🆕 완료 상태 필터
         if filter_status == "미완료만":
             filtered_df = filtered_df[
                 ~filtered_df.get("완료", "").astype(str).str.strip().str.lower().isin(["o", "완료", "done", "x"])
@@ -791,19 +794,27 @@ elif mode == "전체 히스토리":
             this_month = now_kst().strftime("%Y-%m")
             filtered_df = filtered_df[filtered_df["날짜"].astype(str).str.startswith(this_month)]
 
+        # 통계 + 전체 펼치기 버튼 (4열 가로 배치)
         total_count = len(filtered_df)
         completed_count = len(filtered_df[
             filtered_df.get("완료", "").astype(str).str.strip().str.lower().isin(["o", "완료", "done", "x"])
         ])
         pending_count = total_count - completed_count
 
-        col_stat1, col_stat2, col_stat3 = st.columns(3)
-        with col_stat1:
+        col_s1, col_s2, col_s3, col_s4 = st.columns(4)
+        with col_s1:
             st.metric("📊 전체", f"{total_count}건")
-        with col_stat2:
+        with col_s2:
             st.metric("✅ 완료", f"{completed_count}건")
-        with col_stat3:
+        with col_s3:
             st.metric("⏳ 미완료", f"{pending_count}건")
+        with col_s4:
+            if "expand_all" not in st.session_state:
+                st.session_state.expand_all = False
+            if st.button("📂 전체 펼치기" if not st.session_state.expand_all else "📁 전체 접기", 
+                        key="btn_expand_all", use_container_width=True):
+                st.session_state.expand_all = not st.session_state.expand_all
+                st.rerun()
 
         st.divider()
 
@@ -820,7 +831,527 @@ elif mode == "전체 히스토리":
                 done_mark = "✅" if is_done else "⏳"
                 title_style = "~~" if is_done else ""
 
-                with st.expander(f"{done_mark} {title_style}{row['메뉴']} - {row['날짜']}{title_style}"):
+                with st.expander(f"{done_mark} {title_style}{row['메뉴']} - {row['날짜']}{title_style}", expanded=st.session_state.get("expand_all", False)):
+                    st.markdown(f"<span class='badge {badge_class}'>{row['유형']}</span>", unsafe_allow_html=True)
+
+                    if is_done:
+                        st.markdown(f"<div style='color: #9ca3af;'>{row['내용']}</div>", unsafe_allow_html=True)
+                    else:
+                        st.markdown(row['내용'])
+
+                    if row.get('알림시간') and str(row['알림시간']).strip():
+                        st.caption(f"⏰ 알림: {row['알림시간']}")
+
+                    if row.get('이미지') and str(row['이미지']) != 'nan' and str(row['이미지']).strip():
+                        st.image(row['이미지'], use_container_width=True)
+
+                    st.divider()
+
+                    col1, col2, col3 = st.columns(3)
+
+                    with col1:
+                        if row['유형'] == "할일" and not is_done:
+                            if st.button("✅ 완료", key=f"complete_{idx}", use_container_width=True):
+                                notes_df.loc[idx, '완료'] = 'O'
+                                if save_sheet(notes_df, "notes"):
+                                    st.success("완료 처리!")
+                                    st.rerun()
+                        elif is_done:
+                            if st.button("↩️ 취소", key=f"uncomplete_{idx}", use_container_width=True):
+                                notes_df.loc[idx, '완료'] = ''
+                                if save_sheet(notes_df, "notes"):
+                                    st.success("완료 취소!")
+                                    st.rerun()
+
+                    with col2:
+                        if not is_done and row['유형'] != "할일":
+                            if st.button("✓ 완료", key=f"mark_done_{idx}", use_container_width=True):
+                                notes_df.loc[idx, '완료'] = 'O'
+                                if save_sheet(notes_df, "notes"):
+                                    st.success("완료 표시!")
+                                    st.rerun()
+
+                    with col3:
+                        if st.button("🗑️ 삭제", key=f"del_{idx}", use_container_width=True):
+                            if st.session_state.get(f"confirm_del_{idx}", False):
+                                notes_df = notes_df.drop(idx)
+                                if save_sheet(notes_df, "notes"):
+                                    st.success("삭제 완료!")
+                                    st.rerun()
+                            else:
+                                st.session_state[f"confirm_del_{idx}"] = True
+                                st.warning("한번 더 누르면 삭제됩니다")
+        else:
+            st.info("📭 조건에 맞는 기록이 없습니다")
+    elif notes_df.empty:
+        st.info("📭 기록 없음")
+    else:
+        st.error("⚠️ 설정 확인 필요")
+
+# ============ 모바일 최적화 CSS ============
+st.markdown("""
+<style>
+    .block-container {
+        padding-top: 1rem !important;
+        padding-bottom: 1rem !important;
+        padding-left: 1rem !important;
+        padding-right: 1rem !important;
+        max-width: 1400px !important;
+    }
+
+    @media (max-width: 768px) {
+        .block-container {
+            padding-left: 0.5rem !important;
+            padding-right: 0.5rem !important;
+        }
+        h1 { font-size: 1.5rem !important; }
+        h2 { font-size: 1.2rem !important; }
+        h3 { font-size: 1.1rem !important; }
+        .stButton > button {
+            min-height: 44px !important;
+            font-size: 1rem !important;
+            padding: 0.75rem 1rem !important;
+        }
+        .stTextInput > div > div > input,
+        .stSelectbox > div > div > select {
+            min-height: 44px !important;
+            font-size: 16px !important;
+        }
+    }
+
+    h1 {
+        color: #1f2937 !important;
+        font-weight: 700 !important;
+        margin-bottom: 0.5rem !important;
+        padding-bottom: 0.5rem !important;
+        border-bottom: 3px solid #3b82f6 !important;
+    }
+
+    h2 {
+        color: #374151 !important;
+        font-weight: 600 !important;
+        margin-top: 1.5rem !important;
+        margin-bottom: 1rem !important;
+    }
+
+    .badge {
+        display: inline-block;
+        padding: 0.3rem 0.8rem;
+        border-radius: 1rem;
+        font-size: 0.85rem;
+        font-weight: 600;
+        margin-right: 0.5rem;
+    }
+
+    .badge-idea { background: #fef3c7; color: #92400e; }
+    .badge-todo { background: #dbeafe; color: #1e40af; }
+    .badge-update { background: #d1fae5; color: #065f46; }
+    .badge-issue { background: #fee2e2; color: #991b1b; }
+
+    .stButton > button[kind="primary"] {
+        background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%) !important;
+        color: white !important;
+        box-shadow: 0 4px 6px rgba(59, 130, 246, 0.3) !important;
+    }
+
+    .stButton > button[kind="primary"]:hover {
+        transform: translateY(-2px) !important;
+        box-shadow: 0 6px 12px rgba(59, 130, 246, 0.4) !important;
+    }
+
+    [data-testid="stSidebar"] {
+        background: linear-gradient(180deg, #f8fafc 0%, #e2e8f0 100%) !important;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+
+# ============ 헤더 ============
+st.markdown("# 스마트 업무 비서")
+st.caption("🤖 AI 기반 업무 기록 및 관리")
+st.divider()
+
+# ============ 할 일 알림 ============
+pending_tasks = check_pending_tasks()
+if pending_tasks:
+    st.warning(f"⏰ **{len(pending_tasks)}개의 할 일 알림**")
+    for task in pending_tasks:
+        with st.expander(f"{task['상태']} - {task['내용'][:20]}..."):
+            st.markdown(f"**메뉴:** {task['메뉴']}")
+            st.markdown(f"**시간:** {task['알림시간']}")
+            st.markdown(f"**내용:** {task['내용']}")
+
+            if st.button("✅ 완료", key=f"done_{task['idx']}", use_container_width=True):
+                notes_df = load_sheet("notes")
+                notes_df.loc[task['idx'], '완료'] = 'O'
+                if save_sheet(notes_df, "notes"):
+                    st.success("완료!")
+                    st.rerun()
+
+# ============ 사이드바: 모드 선택 ============
+with st.sidebar:
+    st.markdown("## 📱 메뉴")
+
+    mode = st.radio(
+        "선택",
+        ["업무 기록하기", "전체 히스토리", "대화 이력", "일일 리포트", "업무 포트폴리오", "메뉴/설정 관리"],
+        label_visibility="collapsed"
+    )
+
+# ================== 모드 1: 업무 기록하기 ==================
+if mode == "업무 기록하기":
+
+    config_df = load_sheet("config")
+
+    if config_df.empty or len(config_df) == 0:
+        st.error("⚠️ config 시트를 불러올 수 없습니다!")
+        st.info("💡 '메뉴/설정 관리'에서 업무를 먼저 등록하세요")
+        st.stop()
+
+    if "메뉴명" not in config_df.columns:
+        st.error("❌ config 시트에 '메뉴명' 컬럼이 없습니다!")
+        st.stop()
+
+    menu_list = config_df["메뉴명"].tolist()
+
+    if len(menu_list) == 0:
+        st.warning("⚠️ 등록된 업무가 없습니다.")
+        st.stop()
+
+    st.markdown("## 📝 업무 기록")
+
+    # AI 자동/수동 선택
+    col_mode1, col_mode2 = st.columns(2)
+    with col_mode1:
+        ai_auto = st.button("🤖 AI 자동", key="btn_ai", use_container_width=True, 
+                           type="primary" if st.session_state.get("input_mode", "ai") == "ai" else "secondary")
+    with col_mode2:
+        manual = st.button("✋ 수동", key="btn_manual", use_container_width=True,
+                          type="primary" if st.session_state.get("input_mode", "ai") == "manual" else "secondary")
+
+    if ai_auto:
+        st.session_state.input_mode = "ai"
+    if manual:
+        st.session_state.input_mode = "manual"
+
+    if "input_mode" not in st.session_state:
+        st.session_state.input_mode = "ai"
+
+    ai_mode = "🤖 AI 자동" if st.session_state.input_mode == "ai" else "✋ 수동"
+
+    if "uploaded_images" not in st.session_state:
+        st.session_state.uploaded_images = []
+
+    with st.form(key="note_form", clear_on_submit=True):
+
+        if ai_mode == "✋ 수동":
+            selected_menu = st.selectbox("📁 업무", menu_list)
+
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                type_idea = st.checkbox("💡 아이디어", key="type_idea")
+            with col2:
+                type_todo = st.checkbox("✅ 할일", key="type_todo")
+            with col3:
+                type_update = st.checkbox("📝 업데이트", key="type_update")
+            with col4:
+                type_issue = st.checkbox("🔥 문제점", key="type_issue")
+
+            if type_idea:
+                note_type = "아이디어"
+            elif type_todo:
+                note_type = "할일"
+            elif type_issue:
+                note_type = "문제점"
+            else:
+                note_type = "업데이트"
+
+            col_content, col_save = st.columns([5, 1])
+
+            with col_content:
+                content = st.text_area(
+                    "📝 내용", 
+                    height=150,
+                    placeholder="내용을 입력하세요...",
+                    label_visibility="collapsed"
+                )
+
+            with col_save:
+                st.write("")
+                st.write("")
+                submit = st.form_submit_button("💾\n저장", type="primary", use_container_width=True)
+
+            alarm_time = None
+            recurrence = None
+
+            if note_type == "할일":
+                st.markdown("**⏰ 알림 (구글 캘린더 자동 등록)**")
+                st.caption("📅 시간을 입력하면 구글 캘린더에 자동으로 등록됩니다")
+
+                col_date, col_time = st.columns(2)
+                with col_date:
+                    alarm_date = st.date_input("날짜", value=None, label_visibility="collapsed")
+                with col_time:
+                    alarm_time_input = st.time_input("시간", value=None, label_visibility="collapsed")
+
+                if alarm_date and alarm_time_input:
+                    alarm_time = f"{alarm_date.strftime('%Y-%m-%d')} {alarm_time_input.strftime('%H:%M')}"
+
+                st.markdown("**🔄 반복 (선택사항)**")
+                repeat_option = st.selectbox(
+                    "반복 주기",
+                    ["반복 없음", "매일", "매주", "매주 월요일", "매주 금요일", "매달 같은 날", "매달 마지막 날", "매년"],
+                    label_visibility="collapsed"
+                )
+
+                if repeat_option == "매일":
+                    recurrence = "RRULE:FREQ=DAILY"
+                elif repeat_option == "매주":
+                    recurrence = "RRULE:FREQ=WEEKLY"
+                elif repeat_option == "매주 월요일":
+                    recurrence = "RRULE:FREQ=WEEKLY;BYDAY=MO"
+                elif repeat_option == "매주 금요일":
+                    recurrence = "RRULE:FREQ=WEEKLY;BYDAY=FR"
+                elif repeat_option == "매달 같은 날":
+                    if alarm_date:
+                        day = alarm_date.day
+                        recurrence = f"RRULE:FREQ=MONTHLY;BYMONTHDAY={day}"
+                elif repeat_option == "매달 마지막 날":
+                    recurrence = "RRULE:FREQ=MONTHLY;BYMONTHDAY=-1"
+                elif repeat_option == "매년":
+                    recurrence = "RRULE:FREQ=YEARLY"
+
+        else:
+            col_content, col_save = st.columns([5, 1])
+
+            with col_content:
+                content = st.text_area(
+                    "📝 AI가 자동 분류", 
+                    height=200,
+                    placeholder="예: '매달 25일 오후 9시 급여 확인'",
+                    label_visibility="collapsed"
+                )
+
+            with col_save:
+                st.write("")
+                st.write("")
+                st.write("")
+                submit = st.form_submit_button("💾\n저장", type="primary", use_container_width=True)
+
+            selected_menu = None
+            note_type = None
+            alarm_time = None
+            recurrence = None
+
+        st.markdown("---")
+        st.markdown("**🖼️ 이미지 (선택)**")
+
+        uploaded_files = st.file_uploader(
+            "이미지",
+            type=['png', 'jpg', 'jpeg'],
+            accept_multiple_files=True,
+            key="image_uploader",
+            label_visibility="collapsed"
+        )
+
+        if uploaded_files:
+            for f in uploaded_files:
+                if f.name not in [img["name"] for img in st.session_state.uploaded_images]:
+                    st.session_state.uploaded_images.append({
+                        "name": f.name,
+                        "data": f
+                    })
+
+        if st.session_state.uploaded_images:
+            st.info(f"📸 {len(st.session_state.uploaded_images)}개")
+            for idx, img in enumerate(st.session_state.uploaded_images):
+                col_img, col_del = st.columns([4, 1])
+                with col_img:
+                    st.image(img["data"], use_container_width=True)
+                with col_del:
+                    if st.form_submit_button("🗑️", key=f"del_img_form_{idx}"):
+                        st.session_state.uploaded_images.pop(idx)
+                        st.rerun()
+
+        if submit:
+            if content.strip():
+
+                if ai_mode == "🤖 AI 자동":
+                    if "GEMINI_API_KEY" not in st.secrets:
+                        st.error("❌ AI 모드는 API 키 필요")
+                        st.stop()
+
+                    with st.spinner("🤖 분석중..."):
+                        selected_menu, note_type, alarm_time, recurrence = ai_classify_note(content, menu_list, config_df)
+
+                    if selected_menu and note_type:
+                        st.success(f"✅ {selected_menu} / {note_type}")
+                    else:
+                        st.error("❌ 분류 실패")
+                        st.stop()
+
+                image_url = None
+                if st.session_state.uploaded_images:
+                    with st.spinner("📤 업로드중..."):
+                        first_img = st.session_state.uploaded_images[0]
+                        timestamp = now_kst().strftime("%Y%m%d_%H%M%S")
+                        filename = f"{timestamp}_{first_img['name']}"
+                        image_url = upload_to_drive(first_img["data"], filename)
+
+                calendar_link = None
+                if note_type == "할일" and alarm_time:
+                    with st.spinner("📅 캘린더 등록중..."):
+                        calendar_link = create_calendar_event(
+                            title=content[:100],
+                            description=content,
+                            start_datetime_str=alarm_time,
+                            menu=selected_menu,
+                            recurrence=recurrence
+                        )
+                    if calendar_link:
+                        repeat_info = f" (반복: {recurrence})" if recurrence else ""
+                        st.info(f"🔗 [캘린더에서 확인]({calendar_link}){repeat_info}")
+
+                notes_df = load_sheet("notes")
+
+                new_row = pd.DataFrame([{
+                    "날짜": today_kst_str(),
+                    "시간": now_kst().strftime("%H:%M:%S"),
+                    "메뉴": selected_menu,
+                    "유형": note_type,
+                    "내용": content,
+                    "이미지": image_url if image_url else "",
+                    "알림시간": alarm_time if alarm_time else "",
+                    "완료": ""
+                }])
+
+                updated_df = pd.concat([notes_df, new_row], ignore_index=True)
+
+                if save_sheet(updated_df, "notes"):
+                    st.success("✅ 저장 완료!")
+                    if calendar_link:
+                        st.success("📅 캘린더 등록 완료!")
+                    st.session_state.uploaded_images = []
+                    st.rerun()
+                else:
+                    st.error("❌ 저장 실패")
+            else:
+                st.warning("⚠️ 내용 입력 필요")
+
+    st.divider()
+    st.markdown("## 📚 최근 기록")
+
+    notes_df = load_sheet("notes")
+    if not notes_df.empty:
+        recent_notes = notes_df.iloc[::-1].head(5)
+
+        for idx, row in recent_notes.iterrows():
+            badge_class = {
+                "아이디어": "badge-idea",
+                "할일": "badge-todo",
+                "업데이트": "badge-update",
+                "문제점": "badge-issue"
+            }.get(row['유형'], "badge-update")
+
+            with st.expander(f"{row['메뉴']} - {row['날짜']} {row['시간']}"):
+                st.markdown(f"<span class='badge {badge_class}'>{row['유형']}</span>", unsafe_allow_html=True)
+                st.markdown(row['내용'])
+                if row['이미지'] and str(row['이미지']) != 'nan' and str(row['이미지']).strip():
+                    st.image(row['이미지'], use_container_width=True)
+    else:
+        st.info("📭 기록 없음")
+
+
+# ================== 모드 2: 전체 히스토리 ==================
+elif mode == "전체 히스토리":
+    st.markdown("## 📋 전체 히스토리")
+
+    notes_df = load_sheet("notes")
+    config_df = load_sheet("config")
+
+    if not notes_df.empty and not config_df.empty:
+        menu_list = config_df["메뉴명"].tolist()
+
+        # 필터 4개 가로 배치
+        col_f1, col_f2, col_f3, col_f4 = st.columns(4)
+
+        with col_f1:
+            filter_menu = st.selectbox("📁 업무", ["전체"] + menu_list)
+
+        with col_f2:
+            filter_type = st.selectbox("🏷️ 유형", ["전체", "아이디어", "할일", "업데이트", "문제점"])
+
+        with col_f3:
+            filter_status = st.selectbox("✅ 상태", ["전체", "미완료만", "완료만"])
+
+        with col_f4:
+            filter_date = st.selectbox("📅 기간", ["전체", "오늘", "이번 주", "이번 달"])
+
+        filtered_df = notes_df.copy()
+
+        if filter_menu != "전체":
+            filtered_df = filtered_df[filtered_df["메뉴"] == filter_menu]
+
+        if filter_type != "전체":
+            filtered_df = filtered_df[filtered_df["유형"] == filter_type]
+
+        # 🆕 완료 상태 필터
+        if filter_status == "미완료만":
+            filtered_df = filtered_df[
+                ~filtered_df.get("완료", "").astype(str).str.strip().str.lower().isin(["o", "완료", "done", "x"])
+            ]
+        elif filter_status == "완료만":
+            filtered_df = filtered_df[
+                filtered_df.get("완료", "").astype(str).str.strip().str.lower().isin(["o", "완료", "done", "x"])
+            ]
+
+        if filter_date == "오늘":
+            filtered_df = filtered_df[filtered_df["날짜"] == today_kst_str()]
+        elif filter_date == "이번 주":
+            week_ago = (now_kst() - timedelta(days=7)).strftime("%Y-%m-%d")
+            filtered_df = filtered_df[filtered_df["날짜"] >= week_ago]
+        elif filter_date == "이번 달":
+            this_month = now_kst().strftime("%Y-%m")
+            filtered_df = filtered_df[filtered_df["날짜"].astype(str).str.startswith(this_month)]
+
+        # 통계 + 전체 펼치기 버튼 (4열 가로 배치)
+        total_count = len(filtered_df)
+        completed_count = len(filtered_df[
+            filtered_df.get("완료", "").astype(str).str.strip().str.lower().isin(["o", "완료", "done", "x"])
+        ])
+        pending_count = total_count - completed_count
+
+        col_s1, col_s2, col_s3, col_s4 = st.columns(4)
+        with col_s1:
+            st.metric("📊 전체", f"{total_count}건")
+        with col_s2:
+            st.metric("✅ 완료", f"{completed_count}건")
+        with col_s3:
+            st.metric("⏳ 미완료", f"{pending_count}건")
+        with col_s4:
+            if "expand_all" not in st.session_state:
+                st.session_state.expand_all = False
+            if st.button("📂 전체 펼치기" if not st.session_state.expand_all else "📁 전체 접기", 
+                        key="btn_expand_all", use_container_width=True):
+                st.session_state.expand_all = not st.session_state.expand_all
+                st.rerun()
+
+        st.divider()
+
+        if not filtered_df.empty:
+            for idx, row in filtered_df.iloc[::-1].iterrows():
+                badge_class = {
+                    "아이디어": "badge-idea",
+                    "할일": "badge-todo",
+                    "업데이트": "badge-update",
+                    "문제점": "badge-issue"
+                }.get(row['유형'], "badge-update")
+
+                is_done = str(row.get("완료", "")).strip().lower() in ["o", "완료", "done", "x"]
+                done_mark = "✅" if is_done else "⏳"
+                title_style = "~~" if is_done else ""
+
+                with st.expander(f"{done_mark} {title_style}{row['메뉴']} - {row['날짜']}{title_style}", expanded=st.session_state.get("expand_all", False)):
                     st.markdown(f"<span class='badge {badge_class}'>{row['유형']}</span>", unsafe_allow_html=True)
 
                     if is_done:
@@ -953,7 +1484,7 @@ elif mode == "대화 이력":
                             elif file_topic.strip():
                                 with st.spinner("🤖 요약중..."):
                                     try:
-                                        model = genai.GenerativeModel('gemini-2.0-flash-exp')
+                                        model = genai.GenerativeModel('gemini-2.5-flash')
 
                                         prompt = f"""다음 대화를 요약해줘:
 
