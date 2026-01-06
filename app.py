@@ -5,7 +5,7 @@ import pytz
 import os
 import re
 import google.generativeai as genai
-from streamlit_gsheets import GSheetsConnection
+# Streamlit 내장 gsheets 사용 (별도 패키지 불필요)
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload
@@ -31,7 +31,7 @@ def today_kst_str():
     return now_kst().strftime("%Y-%m-%d")
 
 # Google Sheets 연결
-conn = st.connection("gsheets", type=GSheetsConnection)
+conn = st.connection("gsheets", type="gsheets")
 
 @st.cache_data(ttl=60, show_spinner=False)
 def load_sheet(worksheet):
@@ -1653,7 +1653,7 @@ elif mode == "업무 포트폴리오":
         st.info("📭 기록이 없습니다")
 
 
-# ================== 모드 6: 메뉴/설정 관리 ===================
+# ================== 모드 6: 메뉴/설정 관리 ==================
 elif mode == "메뉴/설정 관리":
     st.markdown("## ⚙️ 메뉴/설정 관리")
 
