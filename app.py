@@ -5,7 +5,7 @@ import pytz
 import os
 import re
 import google.generativeai as genai
-# Streamlit 내장 gsheets 사용 (별도 패키지 불필요)
+from streamlit_gsheets import GSheetsConnection
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload
@@ -31,7 +31,7 @@ def today_kst_str():
     return now_kst().strftime("%Y-%m-%d")
 
 # Google Sheets 연결
-conn = st.connection("gsheets", type="gsheets")
+conn = st.connection("gsheets", type=GSheetsConnection)
 
 @st.cache_data(ttl=60, show_spinner=False)
 def load_sheet(worksheet):
