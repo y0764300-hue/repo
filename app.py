@@ -31,7 +31,7 @@ def today_kst_str():
     return now_kst().strftime("%Y-%m-%d")
 
 # Google Sheets 연결
-conn = st.connection("gsheets", type=GSheetsConnection)
+conn = st.connection("gsheets", type="gsheets")
 
 @st.cache_data(ttl=60, show_spinner=False)
 def load_sheet(worksheet):
